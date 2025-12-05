@@ -8,7 +8,7 @@ import toast from 'react-hot-toast' ;
 const NoteCard = ({ note ,setNotes}) => {
   const handleDelete =async (e,id) =>{
        e.preventDefault();//get rid of navigation behaviour
-       if(!window.confirm('are u sure you want to delete note ?'))  
+       if(!window.confirm('are u sure you want to delete note ..?'))  
          return ; 
         
        try {
