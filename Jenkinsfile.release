@@ -3,7 +3,7 @@ pipeline {
     
     environment {
         PROJECT_NAME = "todolistt"
-        VERSION = "v1.0.0"
+        VERSION = "v1.0.0"  // Hardcoded for Windows or set via Jenkins parameter
         BUILD_TIMESTAMP = "${new Date().format('yyyyMMdd_HHmmss')}"
         ARTIFACTS_DIR = "${WORKSPACE}\\artifacts"
         IMAGE_TAG = "${VERSION}-${BUILD_NUMBER}"
@@ -18,11 +18,7 @@ pipeline {
                     echo "======================================"
                     checkout([
                         $class: 'GitSCM',
-                        branches: [[name: '*/dev']],
-                        extensions: [
-                            [$class: 'CloneOption', noTags: false, shallow: false],
-                            [$class: 'LocalBranch', localBranch: 'dev']
-                        ],
+                        branches: [[name: 'main']],
                         userRemoteConfigs: [[
                             url: 'https://github.com/arouedkhelifi/todolistt.git',
                             credentialsId: 'docker-ID'
@@ -32,22 +28,19 @@ pipeline {
                         echo Current Branch:
                         git rev-parse --abbrev-ref HEAD
                         echo.
-                        echo Current Commit:
-                        git log -1 --oneline
-                        echo.
                         echo Recent Tags:
                         git tag -l -n1 2>nul || echo No tags found
                     '''
-                    echo "Checkout Completed"
+                    echo "✅ Checkout Completed"
                 }
             }
         }
         
-        stage('Setup') {
+        stage(' Setup') {
             steps {
                 script {
                     echo "======================================"
-                    echo "Stage 2: Setup (RELEASE)"
+                    echo " Stage 2: Setup (RELEASE)"
                     echo "======================================"
                     bat '''
                         if not exist "%ARTIFACTS_DIR%" mkdir "%ARTIFACTS_DIR%"
@@ -59,39 +52,68 @@ pipeline {
                         echo Image Tag: %IMAGE_TAG%
                         echo Build Number: %BUILD_NUMBER%
                     '''
-                    echo "Setup Completed"
+                    echo "✅ Setup Completed"
                 }
             }
         }
         
-        stage('Build') {
-            steps {
-                script {
-                    echo "======================================"
-                    echo "Stage 3: Build with docker-compose"
-                    echo "======================================"
-                    bat '''
-                        echo Building backend and frontend with docker-compose...
-                        docker-compose build > "%ARTIFACTS_DIR%\\docker_build_release_%BUILD_TIMESTAMP%.log" 2>&1
-                        
-                        if %ERRORLEVEL% EQU 0 (
-                            echo Docker Build PASSED
-                        ) else (
-                            echo Docker Build FAILED
-                            type "%ARTIFACTS_DIR%\\docker_build_release_%BUILD_TIMESTAMP%.log"
-                            exit /b 1
-                        )
-                    '''
-                    echo "Build Completed"
+        stage(' Build') {
+            parallel {
+                stage('Build Backend - Release') {
+                    steps {
+                        script {
+                            echo "📦 Building Backend Release Image..."
+                            bat '''
+                                echo Building Backend with multiple tags...
+                                docker build ^
+                                    -t %PROJECT_NAME%-backend:%VERSION% ^
+                                    -t %PROJECT_NAME%-backend:%IMAGE_TAG% ^
+                                    -t %PROJECT_NAME%-backend:latest ^
+                                    -f Dockerfile.backend . > "%ARTIFACTS_DIR%\\backend_build_release_%BUILD_TIMESTAMP%.log" 2>&1
+                                
+                                if %ERRORLEVEL% EQU 0 (
+                                    echo ✅ Backend Build PASSED
+                                ) else (
+                                    echo ❌ Backend Build FAILED
+                                    type "%ARTIFACTS_DIR%\\backend_build_release_%BUILD_TIMESTAMP%.log"
+                                    exit /b 1
+                                )
+                            '''
+                        }
+                    }
+                }
+                
+                stage('Build Frontend - Release') {
+                    steps {
+                        script {
+                            echo "📦 Building Frontend Release Image..."
+                            bat '''
+                                echo Building Frontend with multiple tags...
+                                docker build ^
+                                    -t %PROJECT_NAME%-frontend:%VERSION% ^
+                                    -t %PROJECT_NAME%-frontend:%IMAGE_TAG% ^
+                                    -t %PROJECT_NAME%-frontend:latest ^
+                                    -f Dockerfile.frontend . > "%ARTIFACTS_DIR%\\frontend_build_release_%BUILD_TIMESTAMP%.log" 2>&1
+                                
+                                if %ERRORLEVEL% EQU 0 (
+                                    echo ✅ Frontend Build PASSED
+                                ) else (
+                                    echo ❌ Frontend Build FAILED
+                                    type "%ARTIFACTS_DIR%\\frontend_build_release_%BUILD_TIMESTAMP%.log"
+                                    exit /b 1
+                                )
+                            '''
+                        }
+                    }
                 }
             }
         }
         
-        stage('Run Docker Stack') {
+        stage(' Run (Docker + Network)') {
             steps {
                 script {
                     echo "======================================"
-                    echo "Stage 4: Run Docker Stack (RELEASE)"
+                    echo "🚀 Stage 4: Run Docker Stack (RELEASE)"
                     echo "======================================"
                     bat '''
                         echo Stopping existing containers...
@@ -115,7 +137,7 @@ pipeline {
                         REM Save container status to artifacts
                         docker-compose ps > "%ARTIFACTS_DIR%\\container_status_%BUILD_TIMESTAMP%.txt" 2>&1
                     '''
-                    echo "Docker Stack Running"
+                    echo "✅ Docker Stack Running"
                 }
             }
         }
@@ -124,7 +146,7 @@ pipeline {
             steps {
                 script {
                     echo "======================================"
-                    echo "Stage 5: Smoke Tests (RELEASE)"
+                    echo "🧪 Stage 5: Smoke Tests (RELEASE)"
                     echo "======================================"
                     bat '''
                         echo Running Release Smoke Tests...
@@ -134,118 +156,118 @@ pipeline {
                         set FAILED=0
                         
                         REM Wait for services
-                        echo Waiting for services to initialize...
+                        echo ⏳ Waiting for services to initialize...
                         ping -n 16 127.0.0.1 >nul
                         
                         REM Test 1: Backend Health Check
-                        echo Test 1: Backend Health Check
+                        echo 🔍 Test 1: Backend Health Check
                         curl -s http://localhost:5000/health >nul 2>&1
                         if %ERRORLEVEL% EQU 0 (
-                            echo PASSED: Backend Health Check
+                            echo ✅ PASSED: Backend Health Check
                             set /a PASSED+=1
                         ) else (
                             curl -s http://localhost:5000 >nul 2>&1
                             if %ERRORLEVEL% EQU 0 (
-                                echo PASSED: Backend responding
+                                echo ✅ PASSED: Backend responding
                                 set /a PASSED+=1
                             ) else (
-                                echo FAILED: Backend not responding
+                                echo ❌ FAILED: Backend not responding
                                 set /a FAILED+=1
                             )
                         )
                         echo.
                         
                         REM Test 2: Frontend Health Check
-                        echo Test 2: Frontend Health Check
+                        echo 🔍 Test 2: Frontend Health Check
                         curl -s http://localhost:3000 >nul 2>&1
                         if %ERRORLEVEL% EQU 0 (
-                            echo PASSED: Frontend responding
+                            echo ✅ PASSED: Frontend responding
                             set /a PASSED+=1
                         ) else (
-                            echo FAILED: Frontend not responding
+                            echo ❌ FAILED: Frontend not responding
                             set /a FAILED+=1
                         )
                         echo.
                         
                         REM Test 3: MongoDB Container
-                        echo Test 3: MongoDB Container Status
+                        echo 🔍 Test 3: MongoDB Container Status
                         docker ps --filter "name=todolistt-mongodb" --format "{{.State}}" | findstr "running" >nul
                         if %ERRORLEVEL% EQU 0 (
-                            echo PASSED: MongoDB container running
+                            echo ✅ PASSED: MongoDB container running
                             set /a PASSED+=1
                         ) else (
-                            echo FAILED: MongoDB container not running
+                            echo ❌ FAILED: MongoDB container not running
                             set /a FAILED+=1
                         )
                         echo.
                         
                         REM Test 4: Backend Container
-                        echo Test 4: Backend Container Status
+                        echo 🔍 Test 4: Backend Container Status
                         docker ps --filter "name=todolistt-backend" --format "{{.State}}" | findstr "running" >nul
                         if %ERRORLEVEL% EQU 0 (
-                            echo PASSED: Backend container running
+                            echo ✅ PASSED: Backend container running
                             set /a PASSED+=1
                         ) else (
-                            echo FAILED: Backend container not running
+                            echo ❌ FAILED: Backend container not running
                             set /a FAILED+=1
                         )
                         echo.
                         
                         REM Test 5: Frontend Container
-                        echo Test 5: Frontend Container Status
+                        echo 🔍 Test 5: Frontend Container Status
                         docker ps --filter "name=todolistt-frontend" --format "{{.State}}" | findstr "running" >nul
                         if %ERRORLEVEL% EQU 0 (
-                            echo PASSED: Frontend container running
+                            echo ✅ PASSED: Frontend container running
                             set /a PASSED+=1
                         ) else (
-                            echo FAILED: Frontend container not running
+                            echo ❌ FAILED: Frontend container not running
                             set /a FAILED+=1
                         )
                         echo.
                         
                         REM Test 6: Docker Images Verification
-                        echo Test 6: Docker Images Verification
+                        echo 🔍 Test 6: Docker Images Verification
                         docker images | findstr "%PROJECT_NAME%-backend" | findstr "%VERSION%" >nul
                         if %ERRORLEVEL% EQU 0 (
-                            echo PASSED: Release images verified
+                            echo ✅ PASSED: Release images verified
                             set /a PASSED+=1
                         ) else (
-                            echo FAILED: Release images not found
+                            echo ❌ FAILED: Release images not found
                             set /a FAILED+=1
                         )
                         echo.
                         
                         REM Summary
                         echo ======================================
-                        echo RELEASE SMOKE TEST SUMMARY
+                        echo 📊 RELEASE SMOKE TEST SUMMARY
                         echo ======================================
                         echo Tests Passed: %PASSED%/6
                         echo Tests Failed: %FAILED%/6
                         echo.
                         
                         if %FAILED% GTR 0 (
-                            echo SOME TESTS FAILED
+                            echo ❌ SOME TESTS FAILED
                             exit /b 1
                         ) else (
-                            echo ALL RELEASE TESTS PASSED
+                            echo ✅ ALL RELEASE TESTS PASSED
                         )
                     ''' | tee "%ARTIFACTS_DIR%\\smoke_test_release_%BUILD_TIMESTAMP%.log"
                     
-                    echo "All Release Smoke Tests PASSED"
+                    echo "✅ All Release Smoke Tests PASSED"
                 }
             }
         }
         
-        stage('Archive Artifacts') {
+        stage(' Archive Artifacts') {
             steps {
                 script {
                     echo "======================================"
-                    echo "Stage 6: Archive Artifacts (RELEASE)"
+                    echo "📦 Stage 6: Archive Artifacts (RELEASE)"
                     echo "======================================"
                     bat '''
-                        echo ================================================ > "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo    TODOLISTT RELEASE BUILD REPORT %VERSION%      >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo ================================================ >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ╔════════════════════════════════════════════╗ > "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ║   TODOLISTT RELEASE BUILD REPORT %VERSION%    ║ >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ╚════════════════════════════════════════════╝ >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo. >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo BUILD INFORMATION >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo ================= >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
@@ -253,17 +275,17 @@ pipeline {
                         echo Build Number: %BUILD_NUMBER% >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo Build Timestamp: %BUILD_TIMESTAMP% >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo Image Tag: %IMAGE_TAG% >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo Build Status: SUCCESS >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo Build Status: ✅ SUCCESS >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo. >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo PIPELINE STAGES COMPLETED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo ========================= >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo Stage 1: Checkout - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo Stage 2: Setup - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo Stage 3: Build (Backend+Frontend parallel) - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo Stage 4: Run (Docker+Network) - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo Stage 5: Smoke Test (6/6 tests) - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo Stage 6: Archive Artifacts - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo Stage 7: Cleanup - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Stage 1: Checkout - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Stage 2: Setup - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Stage 3: Build (Backend+Frontend parallel) - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Stage 4: Run (Docker+Network) - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Stage 5: Smoke Test (6/6 tests) - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Stage 6: Archive Artifacts - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Stage 7: Cleanup - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo. >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo DOCKER IMAGES - PRODUCTION >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo ========================== >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
@@ -281,7 +303,7 @@ pipeline {
                         echo ===================== >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo - MongoDB 6 Alpine >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo - Database: todolistt >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo - Data Persistence: Enabled >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo - Data Persistence: ✅ Enabled >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo. >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo DEPLOYMENT - PRODUCTION >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo ======================= >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
@@ -292,33 +314,33 @@ pipeline {
                         echo. >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo SMOKE TEST RESULTS (6/6 PASSED) >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo =============================== >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo Test 1: Backend Health Check - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo Test 2: Frontend Health Check - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo Test 3: MongoDB Connection - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo Test 4: Backend Container - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo Test 5: Frontend Container - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo Test 6: Docker Images Verification - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Test 1: Backend Health Check - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Test 2: Frontend Health Check - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Test 3: MongoDB Connection - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Test 4: Backend Container - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Test 5: Frontend Container - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Test 6: Docker Images Verification - PASSED >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         echo. >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
-                        echo FINAL VERDICT: PRODUCTION READY >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
+                        echo FINAL VERDICT: ✅ PRODUCTION READY >> "%ARTIFACTS_DIR%\\release_report_%VERSION%_%BUILD_TIMESTAMP%.txt"
                         
                         echo Capturing docker-compose logs...
                         docker-compose logs --no-color > "%ARTIFACTS_DIR%\\docker_compose_release_logs_%BUILD_TIMESTAMP%.log" 2>&1
                         
-                        echo Artifacts Generated
+                        echo ✅ Artifacts Generated
                         dir "%ARTIFACTS_DIR%"
                     '''
                     
                     archiveArtifacts artifacts: 'artifacts/**', fingerprint: true, allowEmptyArchive: true
-                    echo "Artifacts Archived in Jenkins"
+                    echo "✅ Artifacts Archived in Jenkins"
                 }
             }
         }
         
-        stage('Cleanup') {
+        stage(' Cleanup') {
             steps {
                 script {
                     echo "======================================"
-                    echo "Stage 7: Cleanup (RELEASE)"
+                    echo "🧹 Stage 7: Cleanup (RELEASE)"
                     echo "======================================"
                     bat '''
                         echo Stopping release containers...
@@ -330,7 +352,7 @@ pipeline {
                         echo Removing unused volumes...
                         docker volume prune -f 2>nul || echo No unused volumes
                         
-                        echo Cleanup Completed
+                        echo ✅ Cleanup Completed
                     '''
                 }
             }
@@ -341,19 +363,19 @@ pipeline {
         always {
             echo ""
             echo "======================================"
-            echo "Release Pipeline Finished"
+            echo "🏁 Release Pipeline Finished"
             echo "======================================"
             echo "Build Duration: ${currentBuild.durationString}"
         }
         success {
-            echo "RELEASE BUILD ${VERSION} PASSED - Production Ready"
-            echo "Docker Images Tagged:"
+            echo "✅ RELEASE BUILD ${VERSION} PASSED - Production Ready!"
+            echo "📦 Docker Images Tagged:"
             bat '''
                 docker images | findstr "%PROJECT_NAME%"
             '''
         }
         failure {
-            echo "RELEASE BUILD ${VERSION} FAILED"
+            echo "❌ RELEASE BUILD ${VERSION} FAILED"
             echo "Check logs above for details"
             bat 'docker-compose logs --tail=50 || echo No logs available'
         }
