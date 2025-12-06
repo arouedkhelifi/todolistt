@@ -1,219 +1,259 @@
 pipeline {
     agent any
-    
+
+    options {
+        timeout(time: 1, unit: 'HOURS')
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
     environment {
         PROJECT_NAME = "todolistt"
-        BUILD_TIMESTAMP = sh(script: "date +%Y%m%d_%H%M%S", returnStdout: true).trim()
-        ARTIFACTS_DIR = "${WORKSPACE}/artifacts"
+        ARTIFACTS_DIR = "${WORKSPACE}\\artifacts"
         IMAGE_TAG = "${BUILD_NUMBER}-dev"
+        // BUILD_TIMESTAMP calculé en runtime dans Setup
     }
-    
+
     stages {
-        stage('🔍 Checkout') {
+        stage('Checkout') {
+            steps {
+                echo "======================================"
+                echo "Stage 1: Checkout (Multibranch / dev)"
+                echo "======================================"
+                // Multibranch pipeline: checkout scm est disponible
+                checkout scm
+                bat 'git rev-parse --abbrev-ref HEAD && git log --oneline -n 10'
+                script { echo "Detected branch: ${env.BRANCH_NAME}" }
+            }
+        }
+
+        stage('Setup') {
             steps {
                 script {
                     echo "======================================"
-                    echo "📌 Stage 1: Checkout (DEV)"
+                    echo "Stage 2: Setup"
                     echo "======================================"
-                    checkout([
-                        $class: 'GitSCM',
-                        branches: [[name: 'dev']],
-                        userRemoteConfigs: [[url: 'https://github.com/arouedkhelifi/todolistt.git']]
-                    ])
-                    sh '''
-                        echo "Branch: $(git rev-parse --abbrev-ref HEAD)"
-                        git log --oneline -10
-                    '''
-                    echo "✅ Checkout Completed"
+                    // Calculer BUILD_TIMESTAMP en Groovy pour usage dans les scripts bat
+                    env.BUILD_TIMESTAMP = new Date().format('yyyyMMdd_HHmmss')
+                    echo "BUILD_TIMESTAMP = ${env.BUILD_TIMESTAMP}"
                 }
+                // Créer dossier artifacts et vérifier docker/docker-compose
+                bat '''
+                    if not exist "%ARTIFACTS_DIR%" mkdir "%ARTIFACTS_DIR%"
+                    rem Check docker
+                    docker version > "%ARTIFACTS_DIR%\\docker_version_%BUILD_TIMESTAMP%.txt" 2>&1 || echo "docker not available" > "%ARTIFACTS_DIR%\\docker_version_%BUILD_TIMESTAMP%.txt"
+                    rem Check docker-compose
+                    docker-compose version > "%ARTIFACTS_DIR%\\docker_compose_version_%BUILD_TIMESTAMP%.txt" 2>&1 || echo "docker-compose not available" > "%ARTIFACTS_DIR%\\docker_compose_version_%BUILD_TIMESTAMP%.txt"
+                    rem Ensure scripts are executable if unix subsystem present (no-op on plain Windows)
+                    if exist scripts\\smoke-tests.sh (
+                      echo Found scripts\\smoke-tests.sh
+                    )
+                '''
             }
         }
-        
-        stage('⚙️ Setup') {
+
+        stage('Build') {
             steps {
-                script {
-                    echo "======================================"
-                    echo "⚙️ Stage 2: Setup (DEV)"
-                    echo "======================================"
-                    sh '''
-                        mkdir -p ${ARTIFACTS_DIR}
-                        docker --version
-                        docker-compose --version
-                        echo "✅ Setup Completed"
-                    '''
-                }
+                echo "======================================"
+                echo "Stage 3: Build with docker-compose"
+                echo "======================================"
+                // Build via docker-compose and capture log; fail if build fails
+                bat '''
+                    echo Building backend and frontend with docker-compose...
+                    docker-compose build > "%ARTIFACTS_DIR%\\docker_build_%BUILD_TIMESTAMP%.log" 2>&1
+                    if %ERRORLEVEL% EQU 0 (
+                        echo Docker Compose Build PASSED
+                    ) else (
+                        echo Docker Compose Build FAILED
+                        type "%ARTIFACTS_DIR%\\docker_build_%BUILD_TIMESTAMP%.log"
+                        exit /b 1
+                    )
+                '''
             }
         }
-        
-        stage('🔨 Build') {
-            parallel {
-                stage('Build Backend (Node 18)') {
-                    steps {
-                        script {
-                            echo "📦 Building Backend (Node 18)..."
-                            sh '''
-                                docker build -t ${PROJECT_NAME}-backend:${IMAGE_TAG}-node18 -f Dockerfile. backend .  2>&1 | tee ${ARTIFACTS_DIR}/backend_build_node18_${BUILD_TIMESTAMP}. log
-                                if [ ${PIPESTATUS[0]} -eq 0 ]; then
-                                    echo "✅ Backend Build PASSED"
-                                else
-                                    echo "❌ Backend Build FAILED"
-                                    exit 1
-                                fi
-                            '''
-                        }
-                    }
-                }
-                
-                stage('Build Frontend (Node 18)') {
-                    steps {
-                        script {
-                            echo "📦 Building Frontend (Node 18)..."
-                            sh '''
-                                docker build -t ${PROJECT_NAME}-frontend:${IMAGE_TAG}-node18 -f Dockerfile.frontend . 2>&1 | tee ${ARTIFACTS_DIR}/frontend_build_node18_${BUILD_TIMESTAMP}.log
-                                if [ ${PIPESTATUS[0]} -eq 0 ]; then
-                                    echo "✅ Frontend Build PASSED"
-                                else
-                                    echo "❌ Frontend Build FAILED"
-                                    exit 1
-                                fi
-                            '''
-                        }
-                    }
-                }
-            }
-        }
-        
-        stage('🚀 Run (Docker + Network)') {
+
+        stage('Run Docker Stack') {
             steps {
-                script {
-                    echo "======================================"
-                    echo "🚀 Stage 4: Run Docker Stack (DEV)"
-                    echo "======================================"
-                    sh '''
-                        docker-compose down -v 2>/dev/null || true
-                        docker network create ${PROJECT_NAME}-network --driver bridge 2>/dev/null || true
-                        docker-compose up -d
-                        sleep 20
-                        docker-compose ps | tee ${ARTIFACTS_DIR}/container_status_${BUILD_TIMESTAMP}.log
-                        echo "✅ Docker Stack Running"
-                    '''
-                }
+                echo "======================================"
+                echo "Stage 4: Run Docker Stack"
+                echo "======================================"
+                bat '''
+                    echo Stopping existing compose stack (if any)...
+                    docker-compose down -v > "%ARTIFACTS_DIR%\\docker_down_%BUILD_TIMESTAMP%.log" 2>&1 || echo No compose stack to stop >> "%ARTIFACTS_DIR%\\docker_down_%BUILD_TIMESTAMP%.log"
+
+                    echo Removing named containers (best-effort)...
+                    docker rm -f %PROJECT_NAME%-mongodb %PROJECT_NAME%-backend %PROJECT_NAME%-frontend > "%ARTIFACTS_DIR%\\docker_rm_%BUILD_TIMESTAMP%.log" 2>&1 || echo No individual containers to remove >> "%ARTIFACTS_DIR%\\docker_rm_%BUILD_TIMESTAMP%.log"
+
+                    echo Prune containers (best-effort)...
+                    docker container prune -f > "%ARTIFACTS_DIR%\\docker_container_prune_%BUILD_TIMESTAMP%.log" 2>&1 || echo Container prune skipped >> "%ARTIFACTS_DIR%\\docker_container_prune_%BUILD_TIMESTAMP%.log"
+
+                    echo Starting services...
+                    docker-compose up -d > "%ARTIFACTS_DIR%\\docker_up_%BUILD_TIMESTAMP%.log" 2>&1
+
+                    echo Waiting for services to initialize...
+                    ping -n 21 127.0.0.1 >nul
+
+                    echo Container status:
+                    docker-compose ps > "%ARTIFACTS_DIR%\\container_status_%BUILD_TIMESTAMP%.log" 2>&1 || echo docker-compose ps failed > "%ARTIFACTS_DIR%\\container_status_%BUILD_TIMESTAMP%.log"
+                '''
             }
         }
-        
-        stage('🧪 Smoke Test') {
+
+        stage('Smoke Test') {
             steps {
-                script {
-                    echo "======================================"
-                    echo "🧪 Stage 5: Smoke Tests (DEV)"
-                    echo "======================================"
-                    sh '''
-                        bash scripts/smoke-tests.sh 2>&1 | tee ${ARTIFACTS_DIR}/smoke_test_dev_${BUILD_TIMESTAMP}.log
-                        if [ ${PIPESTATUS[0]} -eq 0 ]; then
-                            echo "✅ All Smoke Tests PASSED"
-                        else
-                            echo "❌ Smoke Tests FAILED"
-                            exit 1
-                        fi
-                    '''
-                }
+                echo "======================================"
+                echo "Stage 5: Smoke Tests"
+                echo "======================================"
+                bat '''
+                    @echo off
+                    setlocal enabledelayedexpansion
+                    set PASSED=0
+                    set FAILED=0
+
+                    echo Waiting a bit more for services...
+                    ping -n 11 127.0.0.1 >nul
+
+                    rem Helper function for HTTP check: use curl if present, otherwise PowerShell
+                    rem Test 1: Backend Health Check
+                    echo Test 1: Backend Health Check
+                    where curl >nul 2>&1
+                    if %ERRORLEVEL% EQU 0 (
+                        curl -s -f http://localhost:5000/health >nul 2>&1
+                    ) else (
+                        powershell -Command "try { Invoke-WebRequest -Uri 'http://localhost:5000/health' -UseBasicParsing -TimeoutSec 5 | Out-Null; exit 0 } catch { exit 1 }"
+                    )
+                    if %ERRORLEVEL% EQU 0 (
+                        echo PASSED: Backend health
+                        set /a PASSED+=1
+                    ) else (
+                        echo Backend health failed, trying root endpoint...
+                        where curl >nul 2>&1
+                        if %ERRORLEVEL% EQU 0 (
+                            curl -s -f http://localhost:5000 >nul 2>&1
+                        ) else (
+                            powershell -Command "try { Invoke-WebRequest -Uri 'http://localhost:5000' -UseBasicParsing -TimeoutSec 5 | Out-Null; exit 0 } catch { exit 1 }"
+                        )
+                        if %ERRORLEVEL% EQU 0 (
+                            echo PASSED: Backend responding on root
+                            set /a PASSED+=1
+                        ) else (
+                            echo FAILED: Backend not responding
+                            set /a FAILED+=1
+                        )
+                    )
+                    echo.
+
+                    rem Test 2: Frontend Health Check
+                    echo Test 2: Frontend Health Check
+                    where curl >nul 2>&1
+                    if %ERRORLEVEL% EQU 0 (
+                        curl -s -f http://localhost:3000 >nul 2>&1
+                    ) else (
+                        powershell -Command "try { Invoke-WebRequest -Uri 'http://localhost:3000' -UseBasicParsing -TimeoutSec 5 | Out-Null; exit 0 } catch { exit 1 }"
+                    )
+                    if %ERRORLEVEL% EQU 0 (
+                        echo PASSED: Frontend responding
+                        set /a PASSED+=1
+                    ) else (
+                        echo FAILED: Frontend not responding
+                        set /a FAILED+=1
+                    )
+                    echo.
+
+                    rem Test 3..5: container running checks
+                    docker ps --filter "name=%PROJECT_NAME%-mongodb" --format "{{.State}}" | findstr "running" >nul 2>&1
+                    if %ERRORLEVEL% EQU 0 ( echo PASSED: MongoDB running & set /a PASSED+=1 ) else ( echo FAILED: MongoDB not running & set /a FAILED+=1 )
+
+                    docker ps --filter "name=%PROJECT_NAME%-backend" --format "{{.State}}" | findstr "running" >nul 2>&1
+                    if %ERRORLEVEL% EQU 0 ( echo PASSED: Backend container running & set /a PASSED+=1 ) else ( echo FAILED: Backend container not running & set /a FAILED+=1 )
+
+                    docker ps --filter "name=%PROJECT_NAME%-frontend" --format "{{.State}}" | findstr "running" >nul 2>&1
+                    if %ERRORLEVEL% EQU 0 ( echo PASSED: Frontend container running & set /a PASSED+=1 ) else ( echo FAILED: Frontend container not running & set /a FAILED+=1 )
+
+                    rem Test 6: Docker network existence
+                    docker network ls | findstr "%PROJECT_NAME%-network" >nul 2>&1
+                    if %ERRORLEVEL% EQU 0 ( echo PASSED: Docker network exists & set /a PASSED+=1 ) else ( echo FAILED: Docker network missing & set /a FAILED+=1 )
+
+                    echo.
+                    echo ======================================
+                    echo SMOKE TEST SUMMARY
+                    echo ======================================
+                    echo Tests Passed: %PASSED%/6
+                    echo Tests Failed: %FAILED%/6
+                    echo.
+
+                    if %FAILED% GTR 0 (
+                        echo SOME TESTS FAILED
+                        exit /b 1
+                    ) else (
+                        echo ALL TESTS PASSED
+                        exit /b 0
+                    )
+                '''
             }
         }
-        
-        stage('📦 Archive Artifacts') {
+
+        stage('Archive Artifacts') {
             steps {
-                script {
-                    echo "======================================"
-                    echo "📦 Stage 6: Archive Artifacts (DEV)"
-                    echo "======================================"
-                    sh '''
-                        cat > ${ARTIFACTS_DIR}/dev_pipeline_report_${BUILD_TIMESTAMP}. txt << 'REPORT'
-╔════════════════════════════════════════════╗
-║      DEV BUILD PIPELINE REPORT             ║
-╚════════════════════════════════════════════╝
-
-BUILD INFORMATION
-=================
-Build Number: ${BUILD_NUMBER}
-Build Timestamp: ${BUILD_TIMESTAMP}
-Git Branch: dev
-Build Status: ✅ SUCCESS
-
-PIPELINE STAGES COMPLETED
-=========================
-✅ Stage 1: Checkout - PASSED
-✅ Stage 2: Setup - PASSED
-✅ Stage 3: Build (Backend+Frontend Node18 parallel) - PASSED
-✅ Stage 4: Run (Docker+Network) - PASSED
-✅ Stage 5: Smoke Test (6/6 tests) - PASSED
-✅ Stage 6: Archive Artifacts - PASSED
-
-BUILD ARTIFACTS
-===============
-- ${PROJECT_NAME}-backend:${IMAGE_TAG}-node18
-- ${PROJECT_NAME}-frontend:${IMAGE_TAG}-node18
-
-DATABASE
-========
-- MongoDB 6 Alpine
-- Credentials: admin/password123
-- Database: todolistt
-
-CONTAINERS RUNNING
-==================
-- todolistt-mongodb (port 27017)
-- todolistt-backend (port 5000)
-- todolistt-frontend (port 3000)
-
-SMOKE TEST RESULTS (6/6 PASSED)
-===============================
-✅ Test 1: Backend Health Check - PASSED
-✅ Test 2: Frontend Health Check - PASSED
-✅ Test 3: MongoDB Connection - PASSED
-✅ Test 4: Docker Network Connectivity - PASSED
-✅ Test 5: Container Status Check - PASSED
-✅ Test 6: Docker Images Verification - PASSED
-
-NEXT: Ready for release tagging
-REPORT
-
-                        docker-compose logs --no-color > ${ARTIFACTS_DIR}/docker_compose_logs_${BUILD_TIMESTAMP}.log 2>&1 || true
-                        
-                        echo "✅ Artifacts Archived"
-                    '''
-                    
-                    archiveArtifacts artifacts: 'artifacts/**', fingerprint: true, allowEmptyArchive: true
-                }
+                echo "======================================"
+                echo "Stage 6: Archive Artifacts"
+                echo "======================================"
+                bat '''
+                    echo ================================================ > "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    echo       DEV BUILD PIPELINE REPORT                  >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    echo ================================================ >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    echo. >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    echo BUILD INFORMATION >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    echo ================= >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    echo Build Number: %BUILD_NUMBER% >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    echo Build Timestamp: %BUILD_TIMESTAMP% >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    echo Git Branch: %BRANCH_NAME% >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    echo Build Status: SUCCESS >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    echo. >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    docker-compose ps >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt" 2>&1 || echo 'no compose status' >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    docker-compose logs --no-color > "%ARTIFACTS_DIR%\\docker_logs_%BUILD_TIMESTAMP%.log" 2>&1 || echo No compose logs > "%ARTIFACTS_DIR%\\docker_logs_%BUILD_TIMESTAMP%.log"
+                    dir "%ARTIFACTS_DIR%"
+                '''
+                archiveArtifacts artifacts: 'artifacts/**', fingerprint: true, allowEmptyArchive: true
             }
         }
-        
-        stage('🧹 Cleanup') {
+
+        stage('Cleanup') {
             steps {
-                script {
-                    echo "======================================"
-                    echo "🧹 Stage 7: Cleanup (DEV)"
-                    echo "======================================"
-                    sh '''
-                        bash scripts/cleanup.sh
-                        echo "✅ Cleanup Completed"
-                    '''
-                }
+                echo "======================================"
+                echo "Stage 7: Cleanup"
+                echo "======================================"
+                bat '''
+                    docker-compose down -v > "%ARTIFACTS_DIR%\\docker_down_after_%BUILD_TIMESTAMP%.log" 2>&1 || echo No compose to stop >> "%ARTIFACTS_DIR%\\docker_down_after_%BUILD_TIMESTAMP%.log"
+                    docker image prune -f --filter "dangling=true" > "%ARTIFACTS_DIR%\\image_prune_%BUILD_TIMESTAMP%.log" 2>&1 || echo No dangling images >> "%ARTIFACTS_DIR%\\image_prune_%BUILD_TIMESTAMP%.log"
+                    docker volume prune -f > "%ARTIFACTS_DIR%\\volume_prune_%BUILD_TIMESTAMP%.log" 2>&1 || echo No volumes pruned >> "%ARTIFACTS_DIR%\\volume_prune_%BUILD_TIMESTAMP%.log"
+                '''
             }
         }
     }
-    
+
     post {
         always {
             echo ""
             echo "======================================"
             echo "DEV Pipeline Finished"
             echo "======================================"
+            echo "Build Duration: ${currentBuild.durationString}"
         }
         success {
             echo "✅ DEV PIPELINE PASSED - Ready for release"
         }
         failure {
-            echo "❌ DEV PIPELINE FAILED"
+            echo "❌ DEV PIPELINE FAILED - collecting diagnostics (if available)..."
+            script {
+                // essayer de récupérer les logs Docker si Docker est accessible
+                try {
+                    bat 'docker version >nul 2>&1'
+                    bat 'docker-compose logs --tail=50 > "%ARTIFACTS_DIR%\\post_failure_compose_logs_%BUILD_TIMESTAMP%.log" 2>&1 || echo No logs available'
+                } catch (err) {
+                    echo "Docker non accessible depuis cet agent — logs Docker ignorés"
+                }
+            }
         }
     }
 }
