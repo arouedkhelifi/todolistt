@@ -9,11 +9,11 @@ pipeline {
     }
     
     stages {
-        stage('🔍 Checkout') {
+        stage('Checkout') {
             steps {
                 script {
                     echo "======================================"
-                    echo "📌 Stage 1: Checkout (PR)"
+                    echo "Stage 1: Checkout (PR)"
                     echo "======================================"
                     checkout scm
                     bat 'git log --oneline -5'
@@ -22,11 +22,11 @@ pipeline {
             }
         }
         
-        stage('⚙️ Setup') {
+        stage(' Setup') {
             steps {
                 script {
                     echo "======================================"
-                    echo "⚙️ Stage 2: Setup (PR)"
+                    echo " Stage 2: Setup (PR)"
                     echo "======================================"
                     bat '''
                         if not exist "%ARTIFACTS_DIR%" mkdir "%ARTIFACTS_DIR%"
@@ -38,7 +38,7 @@ pipeline {
             }
         }
         
-        stage('🔨 Build') {
+        stage(' Build') {
             steps {
                 script {
                     echo "======================================"
@@ -61,7 +61,7 @@ pipeline {
             }
         }
         
-        stage('🚀 Run (Docker)') {
+        stage(' Run (Docker)') {
             steps {
                 script {
                     echo "======================================"
@@ -92,11 +92,11 @@ pipeline {
             }
         }
         
-        stage('🧪 Smoke Test') {
+        stage(' Smoke Test') {
             steps {
                 script {
                     echo "======================================"
-                    echo "🧪 Stage 5: Smoke Tests"
+                    echo " Stage 5: Smoke Tests"
                     echo "======================================"
                     bat '''
                         echo Running Smoke Tests...
@@ -207,11 +207,11 @@ pipeline {
             }
         }
         
-        stage('📦 Archive Artifacts') {
+        stage(' Archive Artifacts') {
             steps {
                 script {
                     echo "======================================"
-                    echo "📦 Stage 6: Archive Artifacts"
+                    echo " Stage 6: Archive Artifacts"
                     echo "======================================"
                     bat '''
                         echo ╔════════════════════════════════════════════╗ > "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
@@ -254,7 +254,7 @@ pipeline {
             }
         }
         
-        stage('🧹 Cleanup') {
+        stage('Cleanup') {
             steps {
                 script {
                     echo "======================================"
