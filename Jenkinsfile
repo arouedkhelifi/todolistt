@@ -8,36 +8,56 @@ pipeline {
     }
 
     stages {
-        stage('🔀 Select Pipeline') {
+        stage('🔀
+ Determine Pipeline') {
             steps {
                 script {
-                    echo "======================================"
-                    echo "🔀 Multi-Branch Pipeline Router"
-                    echo "======================================"
+                    echo """
+=========================================================
+        🔀
+ MULTI-PIPELINE ROUTER (AUTO-DETECTION)
+=========================================================
+                    """
 
-                    echo "Jenkins BRANCH_NAME: ${env.BRANCH_NAME}"
+                    // Standard Jenkins env variable
+                    env.BRANCH_NAME = env.BRANCH_NAME ?: env.GIT_BRANCH?.replace('origin/', '')
 
-                    switch(env.BRANCH_NAME) {
+                    echo "📌
+ Branch detected: ${env.BRANCH_NAME}"
 
-                        case "dev":
-                            echo "➡️ Running DEV pipeline"
-                            load "Jenkinsfile.dev"
-                            break
+                    // Security check
+                    if (!env.BRANCH_NAME) {
+                        error "❌
+ BRANCH_NAME is undefined. Jenkins Multibranch Pipeline required."
+                    }
+                }
+            }
+        }
 
-                        case "main":
-                            echo "➡️ Running RELEASE pipeline"
-                            load "Jenkinsfile.release"
-                            break
+        stage('🚀
+ Load Correct Pipeline') {
+            steps {
+                script {
+                    // Conditions routing
+                    if (env.BRANCH_NAME == "main") {
+                        echo "📍
+ Loading Production Pipeline (Jenkinsfile.release)"
+                        load "jenkins/Jenkinsfile.release"
 
-                        default:
-                            if (env.BRANCH_NAME.startsWith("feature/") || 
-                                env.BRANCH_NAME.startsWith("pr/")) {
+                    } else if (env.BRANCH_NAME == "dev") {
+                        echo "📍
+ Loading Development Pipeline (Jenkinsfile.dev)"
+                        load "jenkins/Jenkinsfile.dev"
 
-                                echo "➡️ Running PR pipeline"
-                                load "Jenkinsfile.pr"
-                            } else {
-                                error "❌ No pipeline matched for branch: ${env.BRANCH_NAME}"
-                            }
+                    } else if (env.BRANCH_NAME.startsWith("feature/")) {
+                        echo "📍
+ Loading Pull Request Pipeline (Jenkinsfile.pr)"
+                        load "jenkins/Jenkinsfile.pr"
+
+                    } else {
+                        echo "⚠️
+ Branch '${env.BRANCH_NAME}' not recognized → Running default pipeline"
+                        load "jenkins/Jenkinsfile.default"
                     }
                 }
             }
