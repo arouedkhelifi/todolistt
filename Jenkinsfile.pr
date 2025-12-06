@@ -12,9 +12,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 script {
-                    echo "======================================"
                     echo "Stage 1: Checkout (PR)"
-                    echo "======================================"
                     checkout scm
                     bat 'git log --oneline -5'
                     echo "Checkout Completed"
@@ -25,9 +23,7 @@ pipeline {
         stage('Setup') {
             steps {
                 script {
-                    echo "======================================"
                     echo "Stage 2: Setup (PR)"
-                    echo "======================================"
                     bat '''
                         if not exist "%ARTIFACTS_DIR%" mkdir "%ARTIFACTS_DIR%"
                         docker --version
@@ -41,9 +37,7 @@ pipeline {
         stage('Build') {
             steps {
                 script {
-                    echo "======================================"
                     echo "Stage 3: Build with docker-compose"
-                    echo "======================================"
                     bat '''
                         echo Building backend and frontend with docker-compose...
                         docker-compose build > "%ARTIFACTS_DIR%\\docker_build_%BUILD_TIMESTAMP%.log" 2>&1
@@ -64,9 +58,7 @@ pipeline {
         stage('Run Docker Stack') {
             steps {
                 script {
-                    echo "======================================"
                     echo "Stage 4: Run Docker Stack"
-                    echo "======================================"
                     bat '''
                         echo Stopping existing containers...
                         docker-compose down -v 2>nul || echo No compose stack to stop
@@ -95,9 +87,7 @@ pipeline {
         stage('Smoke Test') {
             steps {
                 script {
-                    echo "======================================"
                     echo "Stage 5: Smoke Tests"
-                    echo "======================================"
                     bat '''
                         echo Running Smoke Tests...
                         echo.
@@ -105,11 +95,9 @@ pipeline {
                         set PASSED=0
                         set FAILED=0
                         
-                        REM Wait for services
                         echo Waiting for services to initialize...
                         ping -n 16 127.0.0.1 >nul
                         
-                        REM Test 1: Backend Health Check
                         echo Test 1: Backend Health Check
                         curl -s http://localhost:5000/health >nul 2>&1
                         if %ERRORLEVEL% EQU 0 (
@@ -127,7 +115,6 @@ pipeline {
                         )
                         echo.
                         
-                        REM Test 2: Frontend Health Check
                         echo Test 2: Frontend Health Check
                         curl -s http://localhost:3000 >nul 2>&1
                         if %ERRORLEVEL% EQU 0 (
@@ -139,7 +126,6 @@ pipeline {
                         )
                         echo.
                         
-                        REM Test 3: MongoDB Container
                         echo Test 3: MongoDB Container Status
                         docker ps --filter "name=todolistt-mongodb" --format "{{.State}}" | findstr "running" >nul
                         if %ERRORLEVEL% EQU 0 (
@@ -151,7 +137,6 @@ pipeline {
                         )
                         echo.
                         
-                        REM Test 4: Backend Container
                         echo Test 4: Backend Container Status
                         docker ps --filter "name=todolistt-backend" --format "{{.State}}" | findstr "running" >nul
                         if %ERRORLEVEL% EQU 0 (
@@ -163,7 +148,6 @@ pipeline {
                         )
                         echo.
                         
-                        REM Test 5: Frontend Container
                         echo Test 5: Frontend Container Status
                         docker ps --filter "name=todolistt-frontend" --format "{{.State}}" | findstr "running" >nul
                         if %ERRORLEVEL% EQU 0 (
@@ -175,7 +159,6 @@ pipeline {
                         )
                         echo.
                         
-                        REM Test 6: Docker Network
                         echo Test 6: Docker Network Connectivity
                         docker network ls | findstr "todolistt-network" >nul 2>&1
                         if %ERRORLEVEL% EQU 0 (
@@ -187,10 +170,8 @@ pipeline {
                         )
                         echo.
                         
-                        REM Summary
-                        echo ======================================
+     
                         echo SMOKE TEST SUMMARY
-                        echo ======================================
                         echo Tests Passed: %PASSED%/6
                         echo Tests Failed: %FAILED%/6
                         echo.
@@ -210,9 +191,7 @@ pipeline {
         stage('Archive Artifacts') {
             steps {
                 script {
-                    echo "======================================"
                     echo "Stage 6: Archive Artifacts"
-                    echo "======================================"
                     bat '''
                         echo ================================================ > "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
                         echo       PR BUILD PIPELINE REPORT                  >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
@@ -257,9 +236,7 @@ pipeline {
         stage('Cleanup') {
             steps {
                 script {
-                    echo "======================================"
                     echo "Stage 7: Cleanup"
-                    echo "======================================"
                     bat '''
                         echo Stopping containers...
                         docker-compose down -v 2>nul || echo Cleanup complete
@@ -278,10 +255,7 @@ pipeline {
     
     post {
         always {
-            echo ""
-            echo "======================================"
             echo "PR Pipeline Finished"
-            echo "======================================"
             echo "Build Duration: ${currentBuild.durationString}"
         }
         success {
