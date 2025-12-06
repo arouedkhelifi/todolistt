@@ -1,30 +1,43 @@
 pipeline {
     agent any
-    
+
     options {
         timeout(time: 1, unit: 'HOURS')
         timestamps()
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
-    
+
     stages {
-        stage('🔀 Determine Pipeline') {
+        stage('🔀 Select Pipeline') {
             steps {
                 script {
                     echo "======================================"
                     echo "🔀 Multi-Branch Pipeline Router"
                     echo "======================================"
-                    
-                    env. BRANCH_NAME = env.GIT_BRANCH. replace('origin/', '')
-                    
-                    if (env.BRANCH_NAME == 'main') {
-                        echo "📍 Branch: MAIN (Production)"
-                    } else if (env.BRANCH_NAME == 'dev') {
-                        echo "📍 Branch: DEV (Development)"
-                    } else if (env.BRANCH_NAME. startsWith('feature/')) {
-                        echo "📍 Branch: FEATURE (${env.BRANCH_NAME})"
-                    } else {
-                        echo "📍 Branch: OTHER (${env.BRANCH_NAME})"
+
+                    echo "Jenkins BRANCH_NAME: ${env.BRANCH_NAME}"
+
+                    switch(env.BRANCH_NAME) {
+
+                        case "dev":
+                            echo "➡️ Running DEV pipeline"
+                            load "Jenkinsfile.dev"
+                            break
+
+                        case "main":
+                            echo "➡️ Running RELEASE pipeline"
+                            load "Jenkinsfile.release"
+                            break
+
+                        default:
+                            if (env.BRANCH_NAME.startsWith("feature/") || 
+                                env.BRANCH_NAME.startsWith("pr/")) {
+
+                                echo "➡️ Running PR pipeline"
+                                load "Jenkinsfile.pr"
+                            } else {
+                                error "❌ No pipeline matched for branch: ${env.BRANCH_NAME}"
+                            }
                     }
                 }
             }
