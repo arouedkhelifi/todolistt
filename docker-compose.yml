@@ -1,0 +1,79 @@
+services:
+  # MongoDB Service
+  mongodb:
+    image: mongo:6
+    container_name: todolistt-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: touilbacem15
+      MONGO_INITDB_ROOT_PASSWORD: XhVgBkeaRGOT9b8d
+      MONGO_INITDB_DATABASE: notes_DB
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - todolistt-network
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'db.runCommand(\"ping\").ok' | mongosh localhost:27017/test --quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Backend Service
+  backend:
+    build:
+      context: ./backend           # point to backend folder
+      dockerfile: Dockerfile       # optional, default is Dockerfile
+    container_name: todolistt-backend
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb+srv://touilbacem15:XhVgBkeaRGOT9b8d@cluster0.bdvtghp.mongodb.net/notes_DB?retryWrites=true&w=majority&appName=Cluster0&authSource=admin
+      PORT: 5000
+    ports:
+      - "5000:5000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - todolistt-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend Service
+  frontend:
+    build:
+      context: ./frontend          # point to frontend folder
+      dockerfile: Dockerfile       # optional, default is Dockerfile
+    container_name: todolistt-frontend
+    environment:
+      REACT_APP_API_URL: http://localhost:5000
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - todolistt-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  mongodb_data:
+  mongodb_config:
+
+networks:
+  todolistt-network:
+    driver: bridge

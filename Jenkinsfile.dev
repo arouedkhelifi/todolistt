@@ -1,0 +1,227 @@
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 1, unit: 'HOURS')
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    environment {
+        PROJECT_NAME  = "todolistt"
+        ARTIFACTS_DIR = "${WORKSPACE}\\artifacts"
+        IMAGE_TAG     = "${BUILD_NUMBER}-dev"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                bat 'git rev-parse --abbrev-ref HEAD && git log --oneline -n 10'
+            }
+        }
+
+        stage('Setup') {
+            steps {
+                script {
+                    env.BUILD_TIMESTAMP = new Date().format('yyyyMMdd_HHmmss')
+                }
+                bat """
+                    if not exist "%ARTIFACTS_DIR%" mkdir "%ARTIFACTS_DIR%"
+
+                    rem -> Vérifier la disponibilité de Docker et docker-compose
+                    docker version > "%ARTIFACTS_DIR%\\docker_version_%BUILD_TIMESTAMP%.txt" 2>&1 || echo docker-not-available > "%ARTIFACTS_DIR%\\docker_version_%BUILD_TIMESTAMP%.txt"
+                    docker-compose version > "%ARTIFACTS_DIR%\\docker_compose_version_%BUILD_TIMESTAMP%.txt" 2>&1 || echo docker-compose-not-available > "%ARTIFACTS_DIR%\\docker_compose_version_%BUILD_TIMESTAMP%.txt"
+
+                    rem -> Existence de scripts utiles
+                    if exist scripts\\smoke-tests.sh (
+                      echo smoke-tests.sh:found > "%ARTIFACTS_DIR%\\script_presence_%BUILD_TIMESTAMP%.txt"
+                    ) else (
+                      echo smoke-tests.sh:not-found > "%ARTIFACTS_DIR%\\script_presence_%BUILD_TIMESTAMP%.txt"
+                    )
+                """
+            }
+        }
+
+        stage('Build') {
+            steps {
+                bat """
+                    docker-compose build > "%ARTIFACTS_DIR%\\docker_build_%BUILD_TIMESTAMP%.log" 2>&1
+                    if %ERRORLEVEL% NEQ 0 (
+                        echo Docker Compose build failed - see log
+                        type "%ARTIFACTS_DIR%\\docker_build_%BUILD_TIMESTAMP%.log"
+                        exit /b 1
+                    )
+                """
+            }
+        }
+
+        stage('Run Docker Stack') {
+            steps {
+                bat """
+                    docker-compose down -v > "%ARTIFACTS_DIR%\\docker_down_%BUILD_TIMESTAMP%.log" 2>&1 || echo no-stack > "%ARTIFACTS_DIR%\\docker_down_%BUILD_TIMESTAMP%.log"
+                    docker rm -f %PROJECT_NAME%-mongodb %PROJECT_NAME%-backend %PROJECT_NAME%-frontend > "%ARTIFACTS_DIR%\\docker_rm_%BUILD_TIMESTAMP%.log" 2>&1 || echo no-containers >> "%ARTIFACTS_DIR%\\docker_rm_%BUILD_TIMESTAMP%.log"
+                    docker container prune -f > "%ARTIFACTS_DIR%\\docker_container_prune_%BUILD_TIMESTAMP%.log" 2>&1 || echo prune-skipped >> "%ARTIFACTS_DIR%\\docker_container_prune_%BUILD_TIMESTAMP%.log"
+
+                    docker-compose up -d > "%ARTIFACTS_DIR%\\docker_up_%BUILD_TIMESTAMP%.log" 2>&1
+                    rem Attente courte pour l'initialisation
+                    ping -n 21 127.0.0.1 >nul
+                    docker-compose ps > "%ARTIFACTS_DIR%\\container_status_%BUILD_TIMESTAMP%.log" 2>&1 || echo ps-failed > "%ARTIFACTS_DIR%\\container_status_%BUILD_TIMESTAMP%.log"
+                """
+            }
+        }
+
+        stage('Smoke Test') {
+            steps {
+                bat '''
+                    echo Running Smoke Tests...
+                    echo.
+                    
+                    set PASSED=0
+                    set FAILED=0
+                    
+                    REM Wait for services
+                    echo Waiting for services to initialize...
+                    ping -n 16 127.0.0.1 >nul
+                    
+                    REM Test 1: Backend Health Check
+                    echo Test 1: Backend Health Check
+                    curl -s http://localhost:5000/health >nul 2>&1
+                    if %ERRORLEVEL% EQU 0 (
+                        echo PASSED: Backend Health Check
+                        set /a PASSED+=1
+                    ) else (
+                        curl -s http://localhost:5000 >nul 2>&1
+                        if %ERRORLEVEL% EQU 0 (
+                            echo PASSED: Backend responding
+                            set /a PASSED+=1
+                        ) else (
+                            echo FAILED: Backend not responding
+                            set /a FAILED+=1
+                        )
+                    )
+                    echo.
+                    
+                    REM Test 2: Frontend Health Check
+                    echo Test 2: Frontend Health Check
+                    curl -s http://localhost:3000 >nul 2>&1
+                    if %ERRORLEVEL% EQU 0 (
+                        echo PASSED: Frontend responding
+                        set /a PASSED+=1
+                    ) else (
+                        echo FAILED: Frontend not responding
+                        set /a FAILED+=1
+                    )
+                    echo.
+                    
+                    REM Test 3: MongoDB Container
+                    echo Test 3: MongoDB Container Status
+                    docker ps --filter "name=todolistt-mongodb" --format "{{.State}}" | findstr "running" >nul
+                    if %ERRORLEVEL% EQU 0 (
+                        echo PASSED: MongoDB container running
+                        set /a PASSED+=1
+                    ) else (
+                        echo FAILED: MongoDB container not running
+                        set /a FAILED+=1
+                    )
+                    echo.
+                    
+                    REM Test 4: Backend Container
+                    echo Test 4: Backend Container Status
+                    docker ps --filter "name=todolistt-backend" --format "{{.State}}" | findstr "running" >nul
+                    if %ERRORLEVEL% EQU 0 (
+                        echo PASSED: Backend container running
+                        set /a PASSED+=1
+                    ) else (
+                        echo FAILED: Backend container not running
+                        set /a FAILED+=1
+                    )
+                    echo.
+                    
+                    REM Test 5: Frontend Container
+                    echo Test 5: Frontend Container Status
+                    docker ps --filter "name=todolistt-frontend" --format "{{.State}}" | findstr "running" >nul
+                    if %ERRORLEVEL% EQU 0 (
+                        echo PASSED: Frontend container running
+                        set /a PASSED+=1
+                    ) else (
+                        echo FAILED: Frontend container not running
+                        set /a FAILED+=1
+                    )
+                    echo.
+                    
+                    REM Test 6: Docker Network
+                    echo Test 6: Docker Network Connectivity
+                    docker network ls | findstr "todolistt-network" >nul 2>&1
+                    if %ERRORLEVEL% EQU 0 (
+                        echo PASSED: Docker network exists
+                        set /a PASSED+=1
+                    ) else (
+                        echo FAILED: Docker network not found
+                        set /a FAILED+=1
+                    )
+                    echo.
+                    
+                    REM Summary
+                    echo ======================================
+                    echo SMOKE TEST SUMMARY
+                    echo ======================================
+                    echo Tests Passed: %PASSED%/6
+                    echo Tests Failed: %FAILED%/6
+                    echo.
+                    
+                    if %FAILED% GTR 0 (
+                        echo SOME TESTS FAILED
+                        exit /b 1
+                    ) else (
+                        echo ALL TESTS PASSED
+                    )
+                '''
+            }
+        }
+
+        stage('Archive Artifacts') {
+            steps {
+                bat """
+                    echo Build Number: %BUILD_NUMBER% > "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    echo Build Timestamp: %BUILD_TIMESTAMP% >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    echo Branch: %BRANCH_NAME% >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    docker-compose ps >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt" 2>&1 || echo no-compose-status >> "%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                    docker-compose logs --no-color > "%ARTIFACTS_DIR%\\docker_logs_%BUILD_TIMESTAMP%.log" 2>&1 || echo no-logs > "%ARTIFACTS_DIR%\\docker_logs_%BUILD_TIMESTAMP%.log"
+                    dir "%ARTIFACTS_DIR%" > "%ARTIFACTS_DIR%\\dir_listing_%BUILD_TIMESTAMP%.txt"
+                """
+                archiveArtifacts artifacts: 'artifacts/**', fingerprint: true, allowEmptyArchive: true
+            }
+        }
+
+        stage('Cleanup') {
+            steps {
+                bat """
+                    docker-compose down -v > "%ARTIFACTS_DIR%\\docker_down_after_%BUILD_TIMESTAMP%.log" 2>&1 || echo no-compose-to-stop >> "%ARTIFACTS_DIR%\\docker_down_after_%BUILD_TIMESTAMP%.log"
+                    docker image prune -f --filter "dangling=true" > "%ARTIFACTS_DIR%\\image_prune_%BUILD_TIMESTAMP%.log" 2>&1 || echo no-dangling >> "%ARTIFACTS_DIR%\\image_prune_%BUILD_TIMESTAMP%.log"
+                    docker volume prune -f > "%ARTIFACTS_DIR%\\volume_prune_%BUILD_TIMESTAMP%.log" 2>&1 || echo no-volumes >> "%ARTIFACTS_DIR%\\volume_prune_%BUILD_TIMESTAMP%.log"
+                """
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Pipeline finished - duration: ${currentBuild.durationString}"
+        }
+        success {
+            echo "DEV PIPELINE PASSED"
+        }
+        failure {
+            echo "DEV PIPELINE FAILED - attempting to collect docker logs (if accessible)"
+            script {
+                try {
+                    bat 'docker version >nul 2>&1'
+                    bat 'docker-compose logs --tail=50 > "%ARTIFACTS_DIR%\\post_failure_compose_logs_%BUILD_TIMESTAMP%.log" 2>&1 || echo no-logs'
+                } catch (err) {
+                    echo "Docker not accessible from agent; logs skipped"
+                }
+            }
+        }
+    }
+}
