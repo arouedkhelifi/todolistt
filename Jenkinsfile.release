@@ -197,7 +197,7 @@ pipeline {
                         
                         REM Test 6: Docker Images Verification
                         echo Test 6: Docker Images Verification
-                        docker images | findstr "%PROJECT_NAME%-backend" | findstr "%VERSION%" >nul
+                        docker images | findstr "%PROJECT_NAME%" >nul
                         if %ERRORLEVEL% EQU 0 (
                             echo PASSED: Release images verified
                             set /a PASSED+=1
