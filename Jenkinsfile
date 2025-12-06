@@ -36,20 +36,17 @@ pipeline {
                     // Pipeline routing
                     if (env.BRANCH_NAME == "main") {
                         echo "Loading Production Pipeline (Jenkinsfile.release)"
-                        load "jenkins/Jenkinsfile.release"
+                        load "Jenkinsfile.release"
 
                     } else if (env.BRANCH_NAME == "dev") {
                         echo "Loading Development Pipeline (Jenkinsfile.dev)"
-                        load "jenkins/Jenkinsfile.dev"
+                        load "Jenkinsfile.dev"
 
                     } else if (env.BRANCH_NAME.startsWith("feature/")) {
                         echo "Loading Pull Request Pipeline (Jenkinsfile.pr)"
-                        load "jenkins/Jenkinsfile.pr"
+                        load "Jenkinsfile.pr"
 
-                    } else {
-                        echo "Branch '${env.BRANCH_NAME}' not recognized → Running default pipeline"
-                        load "jenkins/Jenkinsfile.default"
-                    }
+                    } 
                 }
             }
         }
