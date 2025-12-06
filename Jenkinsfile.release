@@ -65,53 +65,24 @@ pipeline {
         }
         
         stage('Build') {
-            parallel {
-                stage('Build Backend - Release') {
-                    steps {
-                        script {
-                            echo "Building Backend Release Image..."
-                            bat '''
-                                echo Building Backend with multiple tags...
-                                docker build ^
-                                    -t %PROJECT_NAME%-backend:%VERSION% ^
-                                    -t %PROJECT_NAME%-backend:%IMAGE_TAG% ^
-                                    -t %PROJECT_NAME%-backend:latest ^
-                                    -f Dockerfile.backend . > "%ARTIFACTS_DIR%\\backend_build_release_%BUILD_TIMESTAMP%.log" 2>&1
-                                
-                                if %ERRORLEVEL% EQU 0 (
-                                    echo Backend Build PASSED
-                                ) else (
-                                    echo Backend Build FAILED
-                                    type "%ARTIFACTS_DIR%\\backend_build_release_%BUILD_TIMESTAMP%.log"
-                                    exit /b 1
-                                )
-                            '''
-                        }
-                    }
-                }
-                
-                stage('Build Frontend - Release') {
-                    steps {
-                        script {
-                            echo "Building Frontend Release Image..."
-                            bat '''
-                                echo Building Frontend with multiple tags...
-                                docker build ^
-                                    -t %PROJECT_NAME%-frontend:%VERSION% ^
-                                    -t %PROJECT_NAME%-frontend:%IMAGE_TAG% ^
-                                    -t %PROJECT_NAME%-frontend:latest ^
-                                    -f Dockerfile.frontend . > "%ARTIFACTS_DIR%\\frontend_build_release_%BUILD_TIMESTAMP%.log" 2>&1
-                                
-                                if %ERRORLEVEL% EQU 0 (
-                                    echo Frontend Build PASSED
-                                ) else (
-                                    echo Frontend Build FAILED
-                                    type "%ARTIFACTS_DIR%\\frontend_build_release_%BUILD_TIMESTAMP%.log"
-                                    exit /b 1
-                                )
-                            '''
-                        }
-                    }
+            steps {
+                script {
+                    echo "======================================"
+                    echo "Stage 3: Build with docker-compose"
+                    echo "======================================"
+                    bat '''
+                        echo Building backend and frontend with docker-compose...
+                        docker-compose build > "%ARTIFACTS_DIR%\\docker_build_release_%BUILD_TIMESTAMP%.log" 2>&1
+                        
+                        if %ERRORLEVEL% EQU 0 (
+                            echo Docker Build PASSED
+                        ) else (
+                            echo Docker Build FAILED
+                            type "%ARTIFACTS_DIR%\\docker_build_release_%BUILD_TIMESTAMP%.log"
+                            exit /b 1
+                        )
+                    '''
+                    echo "Build Completed"
                 }
             }
         }
