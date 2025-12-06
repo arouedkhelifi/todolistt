@@ -1,29 +1,6 @@
 pipeline {
     agent any
 
-    /*
-     * Jenkinsfile (Windows agent) — Pipeline pour la branche `dev`
-     *
-     * Pré-requis :
-     * - Exécuter ce pipeline dans un job Multibranch Pipeline (checkout scm disponible).
-     * - Agent Windows avec Docker Desktop et docker-compose installés et accessibles
-     *   par l'utilisateur qui exécute l'agent Jenkins (ou configurer DOCKER_HOST).
-     * - Si le repo est privé, configurer des credentials dans Branch Source.
-     *
-     * But :
-     * - Checkout du code (branche dev)
-     * - Vérifications d'environnement (docker, docker-compose)
-     * - Build via docker-compose
-     * - Lancement des services
-     * - Tests de fumée (smoke tests)
-     * - Archivage des artefacts
-     * - Nettoyage
-     *
-     * Remarques de sécurité :
-     * - N'exposez pas le daemon Docker sans TLS en production. Préférez un agent
-     *   JNLP lancé par l'utilisateur qui a Docker Desktop pour un accès fiable au pipe.
-     */
-
     options {
         timeout(time: 1, unit: 'HOURS')
         timestamps()
@@ -34,32 +11,19 @@ pipeline {
         PROJECT_NAME  = "todolistt"
         ARTIFACTS_DIR = "${WORKSPACE}\\artifacts"
         IMAGE_TAG     = "${BUILD_NUMBER}-dev"
-        // BUILD_TIMESTAMP est calculé au runtime dans la stage 'Setup'
     }
 
     stages {
-        /**************************************************************************
-         * 1) Checkout
-         * - Utiliser checkout scm (Multibranch Pipeline).
-         * - Affiche seulement la branche et les commits récents (utile au debug).
-         **************************************************************************/
         stage('Checkout') {
             steps {
                 checkout scm
-                // Affiche le nom de branche et les 10 derniers commits (court)
                 bat 'git rev-parse --abbrev-ref HEAD && git log --oneline -n 10'
             }
         }
 
-        /**************************************************************************
-         * 2) Setup
-         * - Calcul du BUILD_TIMESTAMP (Groovy) pour l'utiliser dans les bat.
-         * - Création du dossier artifacts et vérification minimale de docker.
-         **************************************************************************/
         stage('Setup') {
             steps {
                 script {
-                    // BUILD_TIMESTAMP calculé en Groovy pour consistance Windows bat
                     env.BUILD_TIMESTAMP = new Date().format('yyyyMMdd_HHmmss')
                 }
                 bat """
@@ -79,11 +43,6 @@ pipeline {
             }
         }
 
-        /**************************************************************************
-         * 3) Build
-         * - Construction via docker-compose (logs capturés).
-         * - Échec explicite en cas d'erreur de build.
-         **************************************************************************/
         stage('Build') {
             steps {
                 bat """
@@ -97,11 +56,6 @@ pipeline {
             }
         }
 
-        /**************************************************************************
-         * 4) Run Docker Stack
-         * - Redéployer en mode détaché.
-         * - Attendre l'initialisation minimale.
-         **************************************************************************/
         stage('Run Docker Stack') {
             steps {
                 bat """
@@ -117,67 +71,115 @@ pipeline {
             }
         }
 
-        /**************************************************************************
-         * 5) Smoke Tests
-         * - Vérifications HTTP et état des conteneurs.
-         * - Utilise curl si disponible, PowerShell sinon.
-         **************************************************************************/
         stage('Smoke Test') {
             steps {
-                bat """
-                    @echo off
-                    setlocal enabledelayedexpansion
+                bat '''
+                    echo Running Smoke Tests...
+                    echo.
+                    
                     set PASSED=0
                     set FAILED=0
-
-                    rem Backend health
-                    where curl >nul 2>&1
+                    
+                    REM Wait for services
+                    echo Waiting for services to initialize...
+                    ping -n 16 127.0.0.1 >nul
+                    
+                    REM Test 1: Backend Health Check
+                    echo Test 1: Backend Health Check
+                    curl -s http://localhost:5000/health >nul 2>&1
                     if %ERRORLEVEL% EQU 0 (
-                      curl -s -f http://localhost:5000/health >nul 2>&1
+                        echo PASSED: Backend Health Check
+                        set /a PASSED+=1
                     ) else (
-                      powershell -Command "try { Invoke-WebRequest -Uri 'http://localhost:5000/health' -UseBasicParsing -TimeoutSec 5 | Out-Null; exit 0 } catch { exit 1 }"
+                        curl -s http://localhost:5000 >nul 2>&1
+                        if %ERRORLEVEL% EQU 0 (
+                            echo PASSED: Backend responding
+                            set /a PASSED+=1
+                        ) else (
+                            echo FAILED: Backend not responding
+                            set /a FAILED+=1
+                        )
                     )
-                    if %ERRORLEVEL% EQU 0 ( set /a PASSED+=1 ) else (
-                        rem fallback root
-                        where curl >nul 2>&1
-                        if %ERRORLEVEL% EQU 0 ( curl -s -f http://localhost:5000 >nul 2>&1 ) else ( powershell -Command "try { Invoke-WebRequest -Uri 'http://localhost:5000' -UseBasicParsing -TimeoutSec 5 | Out-Null; exit 0 } catch { exit 1 }" )
-                        if %ERRORLEVEL% EQU 0 ( set /a PASSED+=1 ) else ( set /a FAILED+=1 )
+                    echo.
+                    
+                    REM Test 2: Frontend Health Check
+                    echo Test 2: Frontend Health Check
+                    curl -s http://localhost:3000 >nul 2>&1
+                    if %ERRORLEVEL% EQU 0 (
+                        echo PASSED: Frontend responding
+                        set /a PASSED+=1
+                    ) else (
+                        echo FAILED: Frontend not responding
+                        set /a FAILED+=1
                     )
-
-                    rem Frontend
-                    where curl >nul 2>&1
-                    if %ERRORLEVEL% EQU 0 ( curl -s -f http://localhost:3000 >nul 2>&1 ) else ( powershell -Command "try { Invoke-WebRequest -Uri 'http://localhost:3000' -UseBasicParsing -TimeoutSec 5 | Out-Null; exit 0 } catch { exit 1 }" )
-                    if %ERRORLEVEL% EQU 0 ( set /a PASSED+=1 ) else ( set /a FAILED+=1 )
-
-                    rem Container checks
-                    docker ps --filter "name=%PROJECT_NAME%-mongodb" --format "{{.State}}" | findstr "running" >nul 2>&1
-                    if %ERRORLEVEL% EQU 0 ( set /a PASSED+=1 ) else ( set /a FAILED+=1 )
-
-                    docker ps --filter "name=%PROJECT_NAME%-backend" --format "{{.State}}" | findstr "running" >nul 2>&1
-                    if %ERRORLEVEL% EQU 0 ( set /a PASSED+=1 ) else ( set /a FAILED+=1 )
-
-                    docker ps --filter "name=%PROJECT_NAME%-frontend" --format "{{.State}}" | findstr "running" >nul 2>&1
-                    if %ERRORLEVEL% EQU 0 ( set /a PASSED+=1 ) else ( set /a FAILED+=1 )
-
-                    docker network ls | findstr "%PROJECT_NAME%-network" >nul 2>&1
-                    if %ERRORLEVEL% EQU 0 ( set /a PASSED+=1 ) else ( set /a FAILED+=1 )
-
-                    rem Résumé minimal (journalisé dans console pour faciliter diagnostic)
-                    echo Tests Passed: %PASSED%/6  Tests Failed: %FAILED%/6
-
+                    echo.
+                    
+                    REM Test 3: MongoDB Container
+                    echo Test 3: MongoDB Container Status
+                    docker ps --filter "name=todolistt-mongodb" --format "{{.State}}" | findstr "running" >nul
+                    if %ERRORLEVEL% EQU 0 (
+                        echo PASSED: MongoDB container running
+                        set /a PASSED+=1
+                    ) else (
+                        echo FAILED: MongoDB container not running
+                        set /a FAILED+=1
+                    )
+                    echo.
+                    
+                    REM Test 4: Backend Container
+                    echo Test 4: Backend Container Status
+                    docker ps --filter "name=todolistt-backend" --format "{{.State}}" | findstr "running" >nul
+                    if %ERRORLEVEL% EQU 0 (
+                        echo PASSED: Backend container running
+                        set /a PASSED+=1
+                    ) else (
+                        echo FAILED: Backend container not running
+                        set /a FAILED+=1
+                    )
+                    echo.
+                    
+                    REM Test 5: Frontend Container
+                    echo Test 5: Frontend Container Status
+                    docker ps --filter "name=todolistt-frontend" --format "{{.State}}" | findstr "running" >nul
+                    if %ERRORLEVEL% EQU 0 (
+                        echo PASSED: Frontend container running
+                        set /a PASSED+=1
+                    ) else (
+                        echo FAILED: Frontend container not running
+                        set /a FAILED+=1
+                    )
+                    echo.
+                    
+                    REM Test 6: Docker Network
+                    echo Test 6: Docker Network Connectivity
+                    docker network ls | findstr "todolistt-network" >nul 2>&1
+                    if %ERRORLEVEL% EQU 0 (
+                        echo PASSED: Docker network exists
+                        set /a PASSED+=1
+                    ) else (
+                        echo FAILED: Docker network not found
+                        set /a FAILED+=1
+                    )
+                    echo.
+                    
+                    REM Summary
+                    echo ======================================
+                    echo SMOKE TEST SUMMARY
+                    echo ======================================
+                    echo Tests Passed: %PASSED%/6
+                    echo Tests Failed: %FAILED%/6
+                    echo.
+                    
                     if %FAILED% GTR 0 (
+                        echo SOME TESTS FAILED
                         exit /b 1
                     ) else (
-                        exit /b 0
+                        echo ALL TESTS PASSED
                     )
-                """
+                '''
             }
         }
 
-        /**************************************************************************
-         * 6) Archive Artifacts
-         * - Rassemble logs et état docker-compose puis archive dans Jenkins.
-         **************************************************************************/
         stage('Archive Artifacts') {
             steps {
                 bat """
@@ -192,10 +194,6 @@ pipeline {
             }
         }
 
-        /**************************************************************************
-         * 7) Cleanup
-         * - Tentative d'arrêt propre et nettoyage best-effort.
-         **************************************************************************/
         stage('Cleanup') {
             steps {
                 bat """
@@ -207,10 +205,6 @@ pipeline {
         }
     }
 
-    /**************************************************************************
-     * Post actions
-     * - En cas d'échec, tente de collecter des logs Docker si disponibles.
-     **************************************************************************/
     post {
         always {
             echo "Pipeline finished - duration: ${currentBuild.durationString}"
