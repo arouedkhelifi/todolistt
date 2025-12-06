@@ -221,7 +221,7 @@ pipeline {
                         ) else (
                             echo ALL RELEASE TESTS PASSED
                         )
-                    ''' | tee "%ARTIFACTS_DIR%\\smoke_test_release_%BUILD_TIMESTAMP%.log"
+                    '''
                     
                     echo "All Release Smoke Tests PASSED"
                 }
