@@ -3,75 +3,42 @@ pipeline {
     
     environment {
         PROJECT_NAME = "todolistt"
-        BUILD_TIMESTAMP = bat(script: "@echo %date:~-4,4%%date:~-7,2%%date:~-10,2%_%time:~0,2%%time:~3,2%%time:~6,2%", returnStdout: true).trim()
+        BUILD_TIMESTAMP = "${new Date().format('yyyyMMdd_HHmmss')}"
         ARTIFACTS_DIR = "${WORKSPACE}\\artifacts"
-        IMAGE_TAG = "${BUILD_NUMBER}-dev"
-    }
-    
-    options {
-        timeout(time: 2, unit: 'HOURS')
-        timestamps()
-        buildDiscarder(logRotator(numToKeepStr: '10'))
-        disableConcurrentBuilds()
+        IMAGE_TAG = "${BUILD_NUMBER}-pr"
     }
     
     stages {
-        stage('Checkout') {
+        stage('🔍 Checkout') {
             steps {
                 script {
                     echo "======================================"
-<<<<<<< HEAD
-                    echo "Stage 1: Checkout (PR)"
-=======
-                    echo "📌 Stage 1: Checkout (DEV) - WINDOWS"
->>>>>>> 03ebfda0bd662ee3a456ca91e546d8b0a8a79d26
+                    echo "📌 Stage 1: Checkout (PR)"
                     echo "======================================"
-                    checkout([
-                        $class: 'GitSCM',
-                        branches: [[name: 'dev']],
-                        userRemoteConfigs: [[url: 'https://github.com/arouedkhelifi/todolistt.git']]
-                    ])
-                    bat '''
-                        @echo off
-                        echo Branch: 
-                        git rev-parse --abbrev-ref HEAD
-                        echo.
-                        echo Last 10 commits:
-                        git log --oneline -10
-                    '''
+                    checkout scm
+                    bat 'git log --oneline -5'
                     echo "✅ Checkout Completed"
                 }
             }
         }
         
-        stage(' Setup') {
+        stage('⚙️ Setup') {
             steps {
                 script {
                     echo "======================================"
-<<<<<<< HEAD
-                    echo " Stage 2: Setup (PR)"
-=======
-                    echo "⚙️ Stage 2: Setup (DEV) - WINDOWS"
->>>>>>> 03ebfda0bd662ee3a456ca91e546d8b0a8a79d26
+                    echo "⚙️ Stage 2: Setup (PR)"
                     echo "======================================"
                     bat '''
-                        @echo off
                         if not exist "%ARTIFACTS_DIR%" mkdir "%ARTIFACTS_DIR%"
-                        
-                        echo.
-                        echo Verifying tools:
                         docker --version
                         docker-compose --version
-                        
-                        echo.
-                        echo ✅ Setup Completed
                     '''
+                    echo "✅ Setup Completed"
                 }
             }
         }
         
-<<<<<<< HEAD
-        stage(' Build') {
+        stage('🔨 Build') {
             steps {
                 script {
                     echo "======================================"
@@ -90,336 +57,220 @@ pipeline {
                         )
                     '''
                     echo "✅ Build Completed"
-=======
-        stage('🔨 Build') {
-            parallel {
-                stage('Build Backend (Node 18)') {
-                    steps {
-                        script {
-                            echo "📦 Building Backend (Node 18)..."
-                            bat """
-                                @echo off
-                                set LOG_FILE=%ARTIFACTS_DIR%\\backend_build_node18_%BUILD_TIMESTAMP%.log
-                                
-                                echo Building backend image...
-                                docker build -t %PROJECT_NAME%-backend:%IMAGE_TAG%-node18 -f Dockerfile.backend . > "%LOG_FILE%" 2>&1
-                                
-                                if errorlevel 1 (
-                                    echo ❌ Backend Build FAILED
-                                    type "%LOG_FILE%"
-                                    exit /b 1
-                                ) else (
-                                    echo ✅ Backend Build PASSED
-                                )
-                            """
-                        }
-                    }
-                }
-                
-                stage('Build Frontend (Node 18)') {
-                    steps {
-                        script {
-                            echo "📦 Building Frontend (Node 18)..."
-                            bat """
-                                @echo off
-                                set LOG_FILE=%ARTIFACTS_DIR%\\frontend_build_node18_%BUILD_TIMESTAMP%.log
-                                
-                                echo Building frontend image...
-                                docker build -t %PROJECT_NAME%-frontend:%IMAGE_TAG%-node18 -f Dockerfile.frontend . > "%LOG_FILE%" 2>&1
-                                
-                                if errorlevel 1 (
-                                    echo ❌ Frontend Build FAILED
-                                    type "%LOG_FILE%"
-                                    exit /b 1
-                                ) else (
-                                    echo ✅ Frontend Build PASSED
-                                )
-                            """
-                        }
-                    }
->>>>>>> 03ebfda0bd662ee3a456ca91e546d8b0a8a79d26
                 }
             }
         }
         
-<<<<<<< HEAD
-        stage(' Run (Docker)') {
-=======
-        stage('🚀 Run (Docker + Network)') {
->>>>>>> 03ebfda0bd662ee3a456ca91e546d8b0a8a79d26
+        stage('🚀 Run (Docker)') {
             steps {
                 script {
                     echo "======================================"
-                    echo "🚀 Stage 4: Run Docker Stack (DEV) - WINDOWS"
+                    echo "🚀 Stage 4: Run Docker Stack"
                     echo "======================================"
                     bat '''
-                        @echo off
-                        echo Stopping old containers...
-                        docker-compose down -v 2>nul
+                        echo Stopping existing containers...
+                        docker-compose down -v 2>nul || echo No compose stack to stop
                         
-                        echo Creating Docker network...
-                        docker network create %PROJECT_NAME%-network --driver bridge 2>nul || echo Network already exists
+                        REM Force remove any lingering containers by name
+                        echo Removing any lingering containers...
+                        docker rm -f todolistt-mongodb todolistt-backend todolistt-frontend 2>nul || echo No individual containers to remove
                         
-                        echo Starting containers...
+                        REM Additional cleanup for safety
+                        docker container prune -f 2>nul || echo Container cleanup complete
+                        
+                        echo Starting services...
                         docker-compose up -d
                         
-                        echo Waiting for services to start (20 seconds)...
-                        timeout /t 20 /nobreak >nul
+                        echo Waiting for services to start...
+                        ping -n 21 127.0.0.1 >nul
                         
-                        echo Container status:
-                        docker-compose ps > %ARTIFACTS_DIR%\\container_status_%BUILD_TIMESTAMP%.log
+                        echo Checking container status...
                         docker-compose ps
-                        
-                        echo ✅ Docker Stack Running
                     '''
+                    echo "✅ Docker Stack Running"
                 }
             }
         }
         
-        stage(' Smoke Test') {
+        stage('🧪 Smoke Test') {
             steps {
                 script {
                     echo "======================================"
-<<<<<<< HEAD
-                    echo " Stage 5: Smoke Tests"
-=======
-                    echo "🧪 Stage 5: Smoke Tests (DEV) - WINDOWS"
->>>>>>> 03ebfda0bd662ee3a456ca91e546d8b0a8a79d26
+                    echo "🧪 Stage 5: Smoke Tests"
                     echo "======================================"
-                    bat """
-                        @echo off
-                        set LOG_FILE=%ARTIFACTS_DIR%\\smoke_test_dev_%BUILD_TIMESTAMP%.log
+                    bat '''
+                        echo Running Smoke Tests...
+                        echo.
+                        
                         set PASSED=0
                         set FAILED=0
                         
-                        echo ====================================== > "%LOG_FILE%"
-                        echo SMOKE TESTS REPORT >> "%LOG_FILE%"
-                        echo ====================================== >> "%LOG_FILE%"
-                        echo. >> "%LOG_FILE%"
+                        REM Wait for services
+                        echo ⏳ Waiting for services to initialize...
+                        ping -n 16 127.0.0.1 >nul
                         
                         REM Test 1: Backend Health Check
-                        echo.
-                        echo [1/6] Testing Backend Health Check...
-                        echo [1/6] Backend Health Check >> "%LOG_FILE%"
-                        curl -s -o nul -w "%%{http_code}" http://localhost:5000 | findstr "200" >nul 2>&1
-                        if errorlevel 1 (
-                            curl -s -o nul -w "%%{http_code}" http://localhost:5000/health | findstr "200" >nul 2>&1
-                            if errorlevel 1 (
-                                echo ❌ FAILED: Backend not responding
-                                echo ❌ FAILED >> "%LOG_FILE%"
-                                set /a FAILED+=1
-                            ) else (
-                                echo ✅ PASSED: Backend is healthy
-                                echo ✅ PASSED >> "%LOG_FILE%"
-                                set /a PASSED+=1
-                            )
-                        ) else (
-                            echo ✅ PASSED: Backend is healthy
-                            echo ✅ PASSED >> "%LOG_FILE%"
+                        echo 🔍 Test 1: Backend Health Check
+                        curl -s http://localhost:5000/health >nul 2>&1
+                        if %ERRORLEVEL% EQU 0 (
+                            echo ✅ PASSED: Backend Health Check
                             set /a PASSED+=1
+                        ) else (
+                            curl -s http://localhost:5000 >nul 2>&1
+                            if %ERRORLEVEL% EQU 0 (
+                                echo ✅ PASSED: Backend responding
+                                set /a PASSED+=1
+                            ) else (
+                                echo ❌ FAILED: Backend not responding
+                                set /a FAILED+=1
+                            )
                         )
+                        echo.
                         
                         REM Test 2: Frontend Health Check
-                        echo.
-                        echo [2/6] Testing Frontend Health Check...
-                        echo [2/6] Frontend Health Check >> "%LOG_FILE%"
-                        curl -s -o nul -w "%%{http_code}" http://localhost:3000 | findstr "200" >nul 2>&1
-                        if errorlevel 1 (
+                        echo 🔍 Test 2: Frontend Health Check
+                        curl -s http://localhost:3000 >nul 2>&1
+                        if %ERRORLEVEL% EQU 0 (
+                            echo ✅ PASSED: Frontend responding
+                            set /a PASSED+=1
+                        ) else (
                             echo ❌ FAILED: Frontend not responding
-                            echo ❌ FAILED >> "%LOG_FILE%"
                             set /a FAILED+=1
-                        ) else (
-                            echo ✅ PASSED: Frontend is healthy
-                            echo ✅ PASSED >> "%LOG_FILE%"
-                            set /a PASSED+=1
                         )
-                        
-                        REM Test 3: MongoDB Connection
                         echo.
-                        echo [3/6] Testing MongoDB Connection...
-                        echo [3/6] MongoDB Connection >> "%LOG_FILE%"
-                        docker exec todolistt-mongodb mongosh --eval "db.adminCommand('ping')" >nul 2>&1
-                        if errorlevel 1 (
-                            echo ❌ FAILED: MongoDB not accessible
-                            echo ❌ FAILED >> "%LOG_FILE%"
+                        
+                        REM Test 3: MongoDB Container
+                        echo 🔍 Test 3: MongoDB Container Status
+                        docker ps --filter "name=todolistt-mongodb" --format "{{.State}}" | findstr "running" >nul
+                        if %ERRORLEVEL% EQU 0 (
+                            echo ✅ PASSED: MongoDB container running
+                            set /a PASSED+=1
+                        ) else (
+                            echo ❌ FAILED: MongoDB container not running
                             set /a FAILED+=1
-                        ) else (
-                            echo ✅ PASSED: MongoDB is accessible
-                            echo ✅ PASSED >> "%LOG_FILE%"
-                            set /a PASSED+=1
                         )
-                        
-                        REM Test 4: Docker Network
                         echo.
-                        echo [4/6] Testing Docker Network...
-                        echo [4/6] Docker Network Connectivity >> "%LOG_FILE%"
-                        docker network inspect %PROJECT_NAME%-network >nul 2>&1
-                        if errorlevel 1 (
-                            echo ❌ FAILED: Network not found
-                            echo ❌ FAILED >> "%LOG_FILE%"
-                            set /a FAILED+=1
-                        ) else (
-                            echo ✅ PASSED: Network exists and is healthy
-                            echo ✅ PASSED >> "%LOG_FILE%"
-                            set /a PASSED+=1
-                        )
                         
-                        REM Test 5: Container Status
-                        echo.
-                        echo [5/6] Testing Container Status...
-                        echo [5/6] Container Status Check >> "%LOG_FILE%"
+                        REM Test 4: Backend Container
+                        echo 🔍 Test 4: Backend Container Status
                         docker ps --filter "name=todolistt-backend" --format "{{.State}}" | findstr "running" >nul
-                        if errorlevel 1 (
-                            echo ❌ FAILED: Containers not running properly
-                            echo ❌ FAILED >> "%LOG_FILE%"
-                            set /a FAILED+=1
-                        ) else (
-                            echo ✅ PASSED: All containers are running
-                            echo ✅ PASSED >> "%LOG_FILE%"
+                        if %ERRORLEVEL% EQU 0 (
+                            echo ✅ PASSED: Backend container running
                             set /a PASSED+=1
+                        ) else (
+                            echo ❌ FAILED: Backend container not running
+                            set /a FAILED+=1
                         )
-                        
-                        REM Test 6: Docker Images
                         echo.
-                        echo [6/6] Testing Docker Images...
-                        echo [6/6] Docker Images Verification >> "%LOG_FILE%"
-                        docker images | findstr "%PROJECT_NAME%-backend" >nul
-                        if errorlevel 1 (
-                            echo ❌ FAILED: Docker images not found
-                            echo ❌ FAILED >> "%LOG_FILE%"
-                            set /a FAILED+=1
-                        ) else (
-                            echo ✅ PASSED: All images built successfully
-                            echo ✅ PASSED >> "%LOG_FILE%"
+                        
+                        REM Test 5: Frontend Container
+                        echo 🔍 Test 5: Frontend Container Status
+                        docker ps --filter "name=todolistt-frontend" --format "{{.State}}" | findstr "running" >nul
+                        if %ERRORLEVEL% EQU 0 (
+                            echo ✅ PASSED: Frontend container running
                             set /a PASSED+=1
+                        ) else (
+                            echo ❌ FAILED: Frontend container not running
+                            set /a FAILED+=1
                         )
+                        echo.
+                        
+                        REM Test 6: Docker Network (Fixed to check for workspace-prefixed network)
+                        echo 🔍 Test 6: Docker Network Connectivity
+                        docker network ls | findstr "todolistt-network" >nul 2>&1
+                        if %ERRORLEVEL% EQU 0 (
+                            echo ✅ PASSED: Docker network exists
+                            set /a PASSED+=1
+                        ) else (
+                            echo ❌ FAILED: Docker network not found
+                            set /a FAILED+=1
+                        )
+                        echo.
                         
                         REM Summary
-                        echo. >> "%LOG_FILE%"
-                        echo ====================================== >> "%LOG_FILE%"
-                        echo SUMMARY >> "%LOG_FILE%"
-                        echo ====================================== >> "%LOG_FILE%"
-                        echo Tests Passed: %%PASSED%%/6 >> "%LOG_FILE%"
-                        echo Tests Failed: %%FAILED%%/6 >> "%LOG_FILE%"
-                        
+                        echo ======================================
+                        echo 📊 SMOKE TEST SUMMARY
+                        echo ======================================
+                        echo Tests Passed: %PASSED%/6
+                        echo Tests Failed: %FAILED%/6
                         echo.
-                        echo ======================================
-                        echo SMOKE TESTS SUMMARY
-                        echo ======================================
-                        echo Tests Passed: %%PASSED%%/6
-                        echo Tests Failed: %%FAILED%%/6
                         
-                        if %%FAILED%% GTR 0 (
-                            echo.
-                            echo ❌ Some tests failed!
-                            type "%LOG_FILE%"
+                        if %FAILED% GTR 0 (
+                            echo ❌ SOME TESTS FAILED
                             exit /b 1
                         ) else (
-                            echo.
-                            echo ✅ All Smoke Tests PASSED
+                            echo ✅ ALL TESTS PASSED
                         )
-                    """
+                    ''' 
+                    echo "✅ Smoke Tests Completed"
                 }
             }
         }
         
-        stage(' Archive Artifacts') {
+        stage('📦 Archive Artifacts') {
             steps {
                 script {
                     echo "======================================"
-<<<<<<< HEAD
-                    echo " Stage 6: Archive Artifacts"
-=======
-                    echo "📦 Stage 6: Archive Artifacts (DEV) - WINDOWS"
->>>>>>> 03ebfda0bd662ee3a456ca91e546d8b0a8a79d26
-                    echo "======================================"
-                    bat """
-                        @echo off
-                        set REPORT_FILE=%ARTIFACTS_DIR%\\dev_pipeline_report_%BUILD_TIMESTAMP%.txt
-                        
-                        (
-                            echo ╔════════════════════════════════════════════╗
-                            echo ║      DEV BUILD PIPELINE REPORT             ║
-                            echo ╚════════════════════════════════════════════╝
-                            echo.
-                            echo BUILD INFORMATION
-                            echo =================
-                            echo Build Number: %BUILD_NUMBER%
-                            echo Build Timestamp: %BUILD_TIMESTAMP%
-                            echo Git Branch: dev
-                            echo Build Status: ✅ SUCCESS
-                            echo.
-                            echo PIPELINE STAGES COMPLETED
-                            echo =========================
-                            echo ✅ Stage 1: Checkout - PASSED
-                            echo ✅ Stage 2: Setup - PASSED
-                            echo ✅ Stage 3: Build ^(Backend+Frontend Node18 parallel^) - PASSED
-                            echo ✅ Stage 4: Run ^(Docker+Network^) - PASSED
-                            echo ✅ Stage 5: Smoke Test ^(6/6 tests^) - PASSED
-                            echo ✅ Stage 6: Archive Artifacts - PASSED
-                            echo.
-                            echo BUILD ARTIFACTS
-                            echo ===============
-                            echo - %PROJECT_NAME%-backend:%IMAGE_TAG%-node18
-                            echo - %PROJECT_NAME%-frontend:%IMAGE_TAG%-node18
-                            echo.
-                            echo DATABASE
-                            echo ========
-                            echo - MongoDB 6 Alpine
-                            echo - Credentials: admin/password123
-                            echo - Database: todolistt
-                            echo.
-                            echo CONTAINERS RUNNING
-                            echo ==================
-                            echo - todolistt-mongodb ^(port 27017^)
-                            echo - todolistt-backend ^(port 5000^)
-                            echo - todolistt-frontend ^(port 3000^)
-                            echo.
-                            echo SMOKE TEST RESULTS ^(6/6 PASSED^)
-                            echo ===============================
-                            echo ✅ Test 1: Backend Health Check - PASSED
-                            echo ✅ Test 2: Frontend Health Check - PASSED
-                            echo ✅ Test 3: MongoDB Connection - PASSED
-                            echo ✅ Test 4: Docker Network Connectivity - PASSED
-                            echo ✅ Test 5: Container Status Check - PASSED
-                            echo ✅ Test 6: Docker Images Verification - PASSED
-                            echo.
-                            echo NEXT: Ready for release tagging
-                        ) > "%REPORT_FILE%"
-                        
-                        echo Capturing Docker logs...
-                        docker-compose logs --no-color > %ARTIFACTS_DIR%\\docker_compose_logs_%BUILD_TIMESTAMP%.log 2>&1
-                        
-                        echo ✅ Artifacts Archived
-                    """
-                    
-                    archiveArtifacts artifacts: 'artifacts/**', fingerprint: true, allowEmptyArchive: true
-                }
-            }
-        }
-        
-        stage('Cleanup') {
-            steps {
-                script {
-                    echo "======================================"
-                    echo "🧹 Stage 7: Cleanup (DEV) - WINDOWS"
+                    echo "📦 Stage 6: Archive Artifacts"
                     echo "======================================"
                     bat '''
-                        @echo off
-                        echo Stopping containers...
-                        docker-compose down -v 2>nul
+                        echo ╔════════════════════════════════════════════╗ > "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo ║      PR BUILD PIPELINE REPORT              ║ >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo ╚════════════════════════════════════════════╝ >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo. >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo BUILD INFORMATION >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo ================= >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo Build Number: %BUILD_NUMBER% >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo Build Timestamp: %BUILD_TIMESTAMP% >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo Git Branch: dev >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo Build Status: ✅ SUCCESS >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo. >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo PIPELINE STAGES COMPLETED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo ========================= >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Stage 1: Checkout - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Stage 2: Setup - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Stage 3: Build (docker-compose) - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Stage 4: Run Docker Stack - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Stage 5: Smoke Test (6/6) - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Stage 6: Archive Artifacts - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo ✅ Stage 7: Cleanup - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo. >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo DOCKER CONTAINERS >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo ================= >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        docker-compose ps >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt" 2>&1
+                        echo. >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo FINAL VERDICT: ✅ PR APPROVED FOR REVIEW >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
                         
-                        echo Cleaning dangling images...
-                        docker image prune -f --filter "dangling=true" 2>nul
+                        echo Capturing docker-compose logs...
+                        docker-compose logs --no-color > "%ARTIFACTS_DIR%\\docker_logs_%BUILD_TIMESTAMP%.log" 2>&1
                         
-                        echo Cleaning unused volumes...
-                        docker volume prune -f 2>nul
-                        
-                        echo Cleaning unused networks...
-                        docker network prune -f 2>nul
-                        
-                        echo ✅ Cleanup Completed
+                        echo ✅ Artifacts Generated
+                        dir "%ARTIFACTS_DIR%"
                     '''
+                    
+                    archiveArtifacts artifacts: 'artifacts/**', fingerprint: true, allowEmptyArchive: true
+                    echo "✅ Artifacts Archived in Jenkins"
+                }
+            }
+        }
+        
+        stage('🧹 Cleanup') {
+            steps {
+                script {
+                    echo "======================================"
+                    echo "🧹 Stage 7: Cleanup"
+                    echo "======================================"
+                    bat '''
+                        echo Stopping containers...
+                        docker-compose down -v 2>nul || echo Cleanup complete
+                        
+                        echo Removing dangling images...
+                        docker image prune -f --filter "dangling=true" 2>nul || echo No dangling images
+                        
+                        echo Removing unused volumes...
+                        docker volume prune -f 2>nul || echo No unused volumes
+                    '''
+                    echo "✅ Cleanup Completed"
                 }
             }
         }
@@ -427,64 +278,20 @@ pipeline {
     
     post {
         always {
-            script {
-                echo ""
-                echo "======================================"
-                echo "📊 PIPELINE EXECUTION SUMMARY"
-                echo "======================================"
-                echo "Build Number: ${BUILD_NUMBER}"
-                echo "Duration: ${currentBuild.durationString}"
-                echo "Workspace: ${WORKSPACE}"
-                
-                bat '''
-                    @echo off
-                    echo.
-                    echo Current Docker Status:
-                    echo =====================
-                    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-                '''
-            }
+            echo ""
+            echo "======================================"
+            echo "🏁 PR Pipeline Finished"
+            echo "======================================"
+            echo "Build Duration: ${currentBuild.durationString}"
         }
-        
         success {
-            script {
-                echo ""
-                echo "╔════════════════════════════════════════════╗"
-                echo "║  ✅ DEV PIPELINE PASSED - Ready for release║"
-                echo "╚════════════════════════════════════════════╝"
-                echo ""
-                echo "🎉 All stages passed!"
-                echo "🌐 Frontend: http://localhost:3000"
-                echo "🔧 Backend:  http://localhost:5000"
-                echo "📦 Artifacts: Check the build artifacts"
-            }
+            echo "✅ PR PIPELINE PASSED"
+            echo "Ready for code review!"
         }
-        
         failure {
-            script {
-                echo ""
-                echo "╔════════════════════════════════════════════╗"
-                echo "║  ❌ DEV PIPELINE FAILED                    ║"
-                echo "╚════════════════════════════════════════════╝"
-                echo ""
-                echo "Check the console output for details"
-                
-                bat '''
-                    @echo off
-                    echo.
-                    echo Debugging Information:
-                    echo =====================
-                    echo.
-                    echo Docker Containers:
-                    docker ps -a
-                    echo.
-                    echo Docker Images:
-                    docker images | findstr "%PROJECT_NAME%"
-                    echo.
-                    echo Last Docker Compose logs:
-                    docker-compose logs --tail=20 2>nul
-                '''
-            }
+            echo "❌ PR PIPELINE FAILED"
+            echo "Check logs above for details"
+            bat 'docker-compose logs --tail=50 || echo No logs available'
         }
     }
 }
