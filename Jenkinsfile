@@ -1,50 +1,77 @@
 pipeline {
     agent any
     
+    environment {
+        PROJECT_NAME = "todolistt"
+        ARTIFACTS_DIR = "${WORKSPACE}\\artifacts"
+    }
+    
     stages {
-        stage('Route to Appropriate Pipeline') {
+        stage('Detect Branch') {
             steps {
                 script {
                     def branch = env.BRANCH_NAME ?: 'dev'
-                    def targetJob = ''
                     
-                    // Determine which job to trigger
                     if (branch.startsWith('PR-') || branch.contains('pull')) {
-                        targetJob = 'todolistt-PR-pipeline'
-                        echo "🔀 Routing to PR Pipeline"
+                        env.PIPELINE_TYPE = 'PR'
                     } else if (branch == 'dev' || branch == 'develop') {
-                        targetJob = 'todolistt-DEV-pipeline'
-                        echo "🔀 Routing to DEV Pipeline"
+                        env.PIPELINE_TYPE = 'DEV'
                     } else if (branch == 'main' || branch == 'master' || branch.startsWith('release')) {
-                        targetJob = 'todolistt-RELEASE-pipeline'
-                        echo "🔀 Routing to RELEASE Pipeline"
+                        env.PIPELINE_TYPE = 'RELEASE'
                     } else {
-                        targetJob = 'todolistt-DEV-pipeline'
-                        echo "🔀 Unknown branch, routing to DEV Pipeline (default)"
+                        env.PIPELINE_TYPE = 'DEV'
                     }
                     
-                    echo "Branch: ${branch}"
-                    echo "Target Job: ${targetJob}"
-                    
-                    // Trigger the appropriate job
-                    build job: targetJob, 
-                          parameters: [
-                              string(name: 'BRANCH', value: branch),
-                              string(name: 'BUILD_NUMBER', value: env.BUILD_NUMBER)
-                          ],
-                          wait: true,
-                          propagate: true
+                    echo "Running ${env.PIPELINE_TYPE} Pipeline on ${branch}"
                 }
+            }
+        }
+        
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                bat 'docker-compose build'
+            }
+        }
+        
+        stage('Run') {
+            steps {
+                bat '''
+                    docker-compose down -v 2>nul || echo cleanup
+                    docker rm -f todolistt-mongodb todolistt-backend todolistt-frontend 2>nul || echo removed
+                    docker-compose up -d
+                    ping -n 21 127.0.0.1 >nul
+                '''
+            }
+        }
+        
+      
+        
+        stage('Cleanup') {
+            steps {
+                bat '''
+                    docker-compose down -v 2>nul
+                    docker image prune -f 2>nul
+                '''
             }
         }
     }
     
     post {
+        always {
+            echo "${env.PIPELINE_TYPE} Pipeline: ${currentBuild.result}"
+        }
         success {
-            echo "✓ Pipeline routing successful"
+            echo "✓ PASSED"
         }
         failure {
-            echo "✗ Pipeline routing failed"
+            echo "✗ FAILED"
+            bat 'docker-compose logs --tail=50 || echo no logs'
         }
     }
 }
