@@ -2,41 +2,49 @@ pipeline {
     agent any
     
     stages {
-        stage('Route Pipeline') {
+        stage('Route to Appropriate Pipeline') {
             steps {
                 script {
                     def branch = env.BRANCH_NAME ?: 'dev'
-                    def pipelineFile = ''
+                    def targetJob = ''
                     
-                    // Determine which pipeline to use
+                    // Determine which job to trigger
                     if (branch.startsWith('PR-') || branch.contains('pull')) {
-                        pipelineFile = 'Jenkinsfile.pr'
+                        targetJob = 'todolistt-PR-pipeline'
                         echo "🔀 Routing to PR Pipeline"
                     } else if (branch == 'dev' || branch == 'develop') {
-                        pipelineFile = 'Jenkinsfile.dev'
+                        targetJob = 'todolistt-DEV-pipeline'
                         echo "🔀 Routing to DEV Pipeline"
                     } else if (branch == 'main' || branch == 'master' || branch.startsWith('release')) {
-                        pipelineFile = 'Jenkinsfile.release'
+                        targetJob = 'todolistt-RELEASE-pipeline'
                         echo "🔀 Routing to RELEASE Pipeline"
                     } else {
-                        pipelineFile = 'Jenkinsfile.dev'
-                        echo "🔀 Unknown branch - Routing to DEV Pipeline (default)"
+                        targetJob = 'todolistt-DEV-pipeline'
+                        echo "🔀 Unknown branch, routing to DEV Pipeline (default)"
                     }
                     
                     echo "Branch: ${branch}"
-                    echo "Pipeline: ${pipelineFile}"
-                    echo "Triggering pipeline execution..."
+                    echo "Target Job: ${targetJob}"
                     
-                    // Load and execute the specific pipeline
-                    load(pipelineFile)
+                    // Trigger the appropriate job
+                    build job: targetJob, 
+                          parameters: [
+                              string(name: 'BRANCH', value: branch),
+                              string(name: 'BUILD_NUMBER', value: env.BUILD_NUMBER)
+                          ],
+                          wait: true,
+                          propagate: true
                 }
             }
         }
     }
     
     post {
-        always {
-            echo "Pipeline routing completed"
+        success {
+            echo "✓ Pipeline routing successful"
+        }
+        failure {
+            echo "✗ Pipeline routing failed"
         }
     }
 }
