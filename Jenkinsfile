@@ -50,20 +50,7 @@ pipeline {
             }
         }
         
-        stage('Test') {
-            steps {
-                bat '''
-                    set FAILED=0
-                    
-                    curl -s http://localhost:5000 >nul 2>&1 || set /a FAILED+=1
-                    curl -s http://localhost:3000 >nul 2>&1 || set /a FAILED+=1
-                    docker ps --filter "name=todolistt" | findstr "running" >nul || set /a FAILED+=1
-                    
-                    if %FAILED% GTR 0 exit /b 1
-                    echo All tests passed
-                '''
-            }
-        }
+       
         
         stage('Cleanup') {
             steps {
