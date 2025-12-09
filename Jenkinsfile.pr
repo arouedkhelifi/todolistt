@@ -246,6 +246,71 @@ pipeline {
                 }
             }
         }
+stage('Smoke Tests') {
+    steps {
+        script {
+            echo "======================================"
+            echo "Stage X: Smoke Tests"
+            echo "======================================"
+
+            bat '''
+                echo Running Smoke Tests...
+                echo.
+
+                REM ----------------------------------------------------
+                REM BACKEND SMOKE TESTS
+                REM ----------------------------------------------------
+                echo Backend Smoke Test: Creating a task...
+
+                curl -s -X POST http://localhost:5000/tasks ^
+                    -H "Content-Type: application/json" ^
+                    -d "{\\"title\\":\\"smoke test task\\", \\"description\\":\\"checking pipeline\\"}" >nul 2>&1
+
+                IF %ERRORLEVEL% NEQ 0 (
+                    echo FAILED: Backend cannot create a task
+                    exit /b 1
+                ) ELSE (
+                    echo PASSED: Backend created a task
+                )
+
+                echo Checking if task can be retrieved...
+
+                curl -s http://localhost:5000/tasks | findstr "smoke test task" >nul
+                IF %ERRORLEVEL% NEQ 0 (
+                    echo FAILED: Task retrieval failed
+                    exit /b 1
+                ) ELSE (
+                    echo PASSED: Backend returned created task
+                )
+
+                echo Backend Smoke Tests PASSED
+                echo.
+
+
+                REM ----------------------------------------------------
+                REM FRONTEND SMOKE TESTS
+                REM ----------------------------------------------------
+                echo Frontend Smoke Test: Checking HTML content...
+
+                curl -s http://localhost:3000 | findstr "<html" >nul
+                IF %ERRORLEVEL% NEQ 0 (
+                    echo FAILED: Frontend is not serving HTML page
+                    exit /b 1
+                ) ELSE (
+                    echo PASSED: Frontend homepage is loading correctly
+                )
+
+                echo Frontend Smoke Tests PASSED
+                echo.
+
+                echo ALL SMOKE TESTS PASSED SUCCESSFULLY
+            '''
+
+            echo "Smoke Tests Completed"
+        }
+    }
+}
+
         
         stage('Integration Tests') {
             steps {
