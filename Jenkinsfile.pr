@@ -247,11 +247,76 @@ pipeline {
             }
         }
         
+        stage('Smoke Tests') {
+            steps {
+                script {
+                    echo "======================================"
+                    echo "Stage 6: Smoke Tests"
+                    echo "======================================"
+
+                    bat '''
+                        echo Running Smoke Tests...
+                        echo.
+
+                        REM ----------------------------------------------------
+                        REM BACKEND SMOKE TESTS
+                        REM ----------------------------------------------------
+                        echo Backend Smoke Test: Creating a task...
+
+                        curl -s -X POST http://localhost:5000/tasks ^
+                            -H "Content-Type: application/json" ^
+                            -d "{\\"title\\":\\"smoke test task\\", \\"description\\":\\"checking pipeline\\"}" >nul 2>&1
+
+                        IF %ERRORLEVEL% NEQ 0 (
+                            echo FAILED: Backend cannot create a task
+                            exit /b 1
+                        ) ELSE (
+                            echo PASSED: Backend created a task
+                        )
+
+                        echo Checking if task can be retrieved...
+
+                        curl -s http://localhost:5000/tasks | findstr "smoke test task" >nul
+                        IF %ERRORLEVEL% NEQ 0 (
+                            echo FAILED: Task retrieval failed
+                            exit /b 1
+                        ) ELSE (
+                            echo PASSED: Backend returned created task
+                        )
+
+                        echo Backend Smoke Tests PASSED
+                        echo.
+
+
+                        REM ----------------------------------------------------
+                        REM FRONTEND SMOKE TESTS
+                        REM ----------------------------------------------------
+                        echo Frontend Smoke Test: Checking HTML content...
+
+                        curl -s http://localhost:3000 | findstr "<html" >nul
+                        IF %ERRORLEVEL% NEQ 0 (
+                            echo FAILED: Frontend is not serving HTML page
+                            exit /b 1
+                        ) ELSE (
+                            echo PASSED: Frontend homepage is loading correctly
+                        )
+
+                        echo Frontend Smoke Tests PASSED
+                        echo.
+
+                        echo ALL SMOKE TESTS PASSED SUCCESSFULLY
+                    '''
+
+                    echo "Smoke Tests Completed"
+                }
+            }
+        }
+        
         stage('Integration Tests') {
             steps {
                 script {
                     echo "======================================"
-                    echo "Stage 6: Integration Tests"
+                    echo "Stage 7: Integration Tests"
                     echo "======================================"
                     bat '''
                         echo Running Integration Tests...
@@ -308,7 +373,7 @@ pipeline {
             steps {
                 script {
                     echo "======================================"
-                    echo "Stage 7: Archive Artifacts"
+                    echo "Stage 8: Archive Artifacts"
                     echo "======================================"
                     bat '''
                         echo ================================================ > "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
@@ -335,9 +400,10 @@ pipeline {
                         echo   - Backend Health - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
                         echo   - Frontend Health - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
                         echo   - MongoDB Health - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
-                        echo Stage 6: Integration Tests - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
-                        echo Stage 7: Archive Artifacts - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
-                        echo Stage 8: Cleanup - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo Stage 6: Smoke Tests - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo Stage 7: Integration Tests - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo Stage 8: Archive Artifacts - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
+                        echo Stage 9: Cleanup - PASSED >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
                         echo. >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
                         echo DOCKER CONTAINERS >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
                         echo ================= >> "%ARTIFACTS_DIR%\\pr_pipeline_report_%BUILD_TIMESTAMP%.txt"
@@ -367,7 +433,7 @@ pipeline {
             steps {
                 script {
                     echo "======================================"
-                    echo "Stage 8: Cleanup"
+                    echo "Stage 9: Cleanup"
                     echo "======================================"
                     bat '''
                         echo Stopping containers...
@@ -401,6 +467,10 @@ pipeline {
             echo "  ✓ Backend Build & Health Check"
             echo "  ✓ Frontend Build & Health Check"
             echo "  ✓ MongoDB Preparation & Health Check"
+            echo ""
+            echo "Sequential Stages Executed:"
+            echo "  ✓ Smoke Tests"
+            echo "  ✓ Integration Tests"
         }
         failure {
             echo "PR PIPELINE FAILED"
