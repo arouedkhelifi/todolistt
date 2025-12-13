@@ -369,31 +369,6 @@ thinkboard/
 └── README.md
 ```
 
----
-
-##  Contributing
-
-We welcome contributions! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-### Commit Convention
-```
-feat: Add new feature
-fix: Fix bug
-docs: Update documentation
-style: Format code
-refactor: Refactor code
-test: Add tests
-chore: Update dependencies
-```
-
----
-
 ##  API Endpoints
 
 ### Notes API
@@ -404,15 +379,6 @@ POST   /api/notes          - Create new note
 PUT    /api/notes/:id      - Update note
 DELETE /api/notes/:id      - Delete note
 ```
-
-### Health Check
-```
-GET    /health             - Check API status
-```
-
----
-
-##  Environment Variables
 
 ### Backend Configuration
 ```env
